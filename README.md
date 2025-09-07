@@ -1,31 +1,51 @@
 # Subsurface Imaging API
 
-Simple API for processing and querying subsurface imaging data.
+A complete solution for processing and querying subsurface imaging data with efficient storage and API access.
 
-## Setup
+## Features
 
-1. Process the CSV data:
+- **Image Processing**: Resize images from 200px to 150px width
+- **Efficient Storage**: TileDB arrays with ZSTD compression
+- **REST API**: Query images by depth range with multiple response formats
+- **Custom Colormap**: Geological visualization with blue-to-red colormap
+- **Docker Support**: Containerized deployment ready
+- **Multi-Survey Support**: Handle multiple survey datasets
+
+## Quick Start
+
+### 1. Process Data
 ```bash
 python data_ingestion.py
 ```
 
-2. Start the API:
+### 2. Start API
 ```bash
 python -m uvicorn api:app --reload
 ```
 
-3. Test the API:
+### 3. Test API
 ```bash
 python test_api.py
 ```
 
+## Docker Deployment
+
+```bash
+# Complete pipeline
+docker-compose up --build
+
+# Individual services
+./run_ingestion.sh  # Data processing
+./run_api.sh        # API service
+```
+
 ## API Endpoints
 
-- `/health` - Check if API is running
-- `/stats` - Get data statistics
-- `/surveys` - List available surveys
-- `/frames` - Query frames by depth range
-- `/frames/image` - Get frames as PNG image
+- `GET /health` - Health check
+- `GET /stats` - Array statistics
+- `GET /surveys` - List available surveys
+- `GET /frames` - Query frames by depth range
+- `GET /frames/image` - Get frames as PNG image
 
 ## Example Usage
 
@@ -34,9 +54,24 @@ Query frames from depth 9100 to 9200:
 curl "http://localhost:8000/frames?depth_min=9100&depth_max=9200&survey_id=1"
 ```
 
-## Docker
+## Requirements
 
-Run with Docker:
-```bash
-docker-compose up --build
+- Python 3.8+
+- TileDB
+- FastAPI
+- OpenCV
+- NumPy
+- Pandas
+
+## Project Structure
+
+```
+├── api.py                 # Main FastAPI application
+├── data_ingestion.py      # Data processing pipeline
+├── test_api.py           # Comprehensive test suite
+├── requirements.txt      # Python dependencies
+├── Dockerfile.*          # Container definitions
+├── docker-compose.yml    # Service orchestration
+├── run_*.sh             # Execution scripts
+└── README.md            # Project documentation
 ```

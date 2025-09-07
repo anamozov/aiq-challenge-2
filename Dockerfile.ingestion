@@ -1,0 +1,39 @@
+# Data Ingestion Service Dockerfile
+FROM python:3.10-slim as base
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PIP_NO_CACHE_DIR=1
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    libgomp1 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create app directory
+WORKDIR /app
+
+# Copy requirements first (for better caching)
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy ingestion code only
+COPY data_ingestion.py .
+
+# Create necessary directories
+RUN mkdir -p data/arrays data/processed logs
+
+# Default command - run data ingestion
+CMD ["python", "data_ingestion.py"]

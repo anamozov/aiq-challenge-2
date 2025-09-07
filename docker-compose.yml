@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  # Data Ingestion Service
+  data-ingestion:
+    build:
+      context: .
+      dockerfile: Dockerfile.ingestion
+    volumes:
+      # Mount data directory for persistence
+      - ./data:/app/data
+      # Mount CSV file
+      - ./Challenge2.csv:/app/Challenge2.csv:ro
+      # Mount logs
+      - ./logs:/app/logs
+    environment:
+      - PYTHONPATH=/app
+      - LOG_LEVEL=INFO
+    profiles:
+      - ingestion  # Only run when explicitly requested
+    command: ["python", "data_ingestion.py"]
+
+  # API Service
+  subsurface-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount data directory for persistence (shared with ingestion)
+      - ./data:/app/data
+      # Mount logs
+      - ./logs:/app/logs
+    environment:
+      - PYTHONPATH=/app
+      - LOG_LEVEL=INFO
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # depends_on:
+    #   - data-ingestion
+
+  # Optional: Add Redis for caching (uncomment if needed)
+  # redis:
+  #   image: redis:7-alpine
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - redis_data:/data
+  #   restart: unless-stopped
+
+# volumes:
+#   redis_data:

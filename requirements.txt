@@ -1,0 +1,24 @@
+# Core dependencies
+tiledb==0.21.6
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+
+# Image processing
+numpy==1.24.3
+opencv-python==4.8.1.78
+Pillow==10.0.1
+matplotlib==3.7.2
+
+# Data processing
+pandas==2.0.3
+scipy==1.11.3
+
+# API utilities
+pydantic==2.4.2
+aiofiles==23.2.1
+
+# Development tools
+pytest==7.4.2
+requests==2.31.0
+python-dotenv==1.0.0

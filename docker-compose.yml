@@ -6,6 +6,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.ingestion
+    container_name: aiq_data_ingestion
     volumes:
       # Mount data directory for persistence
       - ./data:/app/data
@@ -19,12 +20,15 @@ services:
     profiles:
       - ingestion  # Only run when explicitly requested
     command: ["python", "data_ingestion.py"]
+    networks:
+      - aiq_network
 
   # API Service
   subsurface-api:
     build:
       context: .
       dockerfile: Dockerfile.api
+    container_name: aiq_subsurface_api
     ports:
       - "8000:8000"
     volumes:
@@ -42,17 +46,9 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-    # depends_on:
-    #   - data-ingestion
+    networks:
+      - aiq_network
 
-  # Optional: Add Redis for caching (uncomment if needed)
-  # redis:
-  #   image: redis:7-alpine
-  #   ports:
-  #     - "6379:6379"
-  #   volumes:
-  #     - redis_data:/data
-  #   restart: unless-stopped
-
-# volumes:
-#   redis_data:
+networks:
+  aiq_network:
+    driver: bridge

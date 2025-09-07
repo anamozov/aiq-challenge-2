@@ -1,8 +1,11 @@
-# Core dependencies
-tiledb==0.21.6
+# Core API dependencies
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 python-multipart==0.0.6
+pydantic==2.4.2
+
+# Data storage
+tiledb==0.21.6
 
 # Image processing
 numpy==1.24.3
@@ -15,10 +18,13 @@ pandas==2.0.3
 scipy==1.11.3
 
 # API utilities
-pydantic==2.4.2
 aiofiles==23.2.1
-
-# Development tools
-pytest==7.4.2
 requests==2.31.0
+
+# Development and testing
+pytest==7.4.2
 python-dotenv==1.0.0
+
+# Optional: For better performance
+# numba==0.58.1
+# cython==3.0.2

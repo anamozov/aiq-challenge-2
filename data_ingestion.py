@@ -177,6 +177,10 @@ class SubsurfaceDataProcessor:
     def _create_new_array(self, intensities, red_data, green_data, blue_data, depth_array, survey_array, timestamp_array):
         height, width = intensities.shape
         
+        # Ensure the directory exists
+        import os
+        os.makedirs(os.path.dirname(self.array_path), exist_ok=True)
+        
         schema = self.create_array_schema(height, width)
         tiledb.DenseArray.create(self.array_path, schema)
         
@@ -195,6 +199,10 @@ class SubsurfaceDataProcessor:
     
     def _append_to_existing_array(self, intensities, red_data, green_data, blue_data, depth_array, survey_array, timestamp_array):
         height, width = intensities.shape
+        
+        # Ensure the directory exists
+        import os
+        os.makedirs(os.path.dirname(self.array_path), exist_ok=True)
         
         with tiledb.DenseArray(self.array_path, mode="r") as A:
             existing_data = A[:]

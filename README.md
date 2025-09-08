@@ -25,7 +25,7 @@ python -m uvicorn api:app --reload
 
 ### 3. Test API
 ```bash
-python test_api.py
+python tests/test_api.py
 ```
 
 ## Docker Deployment
@@ -68,7 +68,11 @@ curl "http://localhost:8000/frames?depth_min=9100&depth_max=9200&image_id=1"
 ```
 ├── api.py                 # Main FastAPI application
 ├── data_ingestion.py      # Data processing pipeline
-├── test_api.py           # Comprehensive test suite
+├── tests/                # Test suite directory
+│   ├── test_api.py       # API functionality tests
+│   ├── test_performance.py  # Performance benchmarking  
+│   ├── test_validation.py   # Data validation tests
+│   └── test_pipeline.py     # Pipeline automation tests
 ├── requirements.txt      # Python dependencies
 ├── Dockerfile.*          # Container definitions
 ├── docker-compose.yml    # Service orchestration

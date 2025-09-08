@@ -74,7 +74,7 @@ docker-compose up data-ingestion
 docker-compose up -d image-api
 ```
 
-## 📡 API Endpoints
+##  API Endpoints
 
 ### Core Data Endpoints
 - `GET /images` - List available images with depth ranges

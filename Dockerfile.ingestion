@@ -29,11 +29,11 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy ingestion code only
-COPY data_ingestion.py .
+# Copy app package for ingestion
+COPY app/ ./app/
 
 # Create necessary directories
 RUN mkdir -p db/arrays data/processed data/failed logs
 
 # Default command - run data ingestion
-CMD ["python", "data_ingestion.py"]
+CMD ["python", "-m", "app.data_ingestion"]

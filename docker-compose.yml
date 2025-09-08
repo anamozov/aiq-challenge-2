@@ -21,7 +21,7 @@ services:
       - LOG_LEVEL=INFO
     profiles:
       - ingestion  # Only run when explicitly requested
-    command: ["python", "data_ingestion.py"]
+    command: ["python", "-m", "app.data_ingestion"]
     networks:
       - aiq_network
 

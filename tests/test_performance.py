@@ -5,7 +5,7 @@ import shutil
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from data_ingestion import ImageDataProcessor
+from app.data_ingestion import ImageDataProcessor
 
 def test_performance():
     array_path = "db/arrays/image_data"

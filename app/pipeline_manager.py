@@ -9,7 +9,7 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 import schedule
 import pandas as pd
-from data_ingestion import ImageDataProcessor
+from app.data_ingestion import ImageDataProcessor
 from typing import Dict, List, Optional
 import hashlib
 

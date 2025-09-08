@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any
 from matplotlib.colors import LinearSegmentedColormap
 import matplotlib.pyplot as plt
-from pipeline_manager import DataPipelineManager
+from app.pipeline_manager import DataPipelineManager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

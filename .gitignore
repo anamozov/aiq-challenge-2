@@ -182,6 +182,6 @@ Thumbs.db
 config.local.py
 settings.local.py
 
-# Project status and summary files
-FINAL_STATUS.md
-PROJECT_SUMMARY.md
+# Project status and summary files (commented out to keep them untracked but visible)
+# FINAL_STATUS.md
+# PROJECT_SUMMARY.md

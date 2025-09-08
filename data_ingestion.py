@@ -13,7 +13,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 class ImageDataProcessor:
-    def __init__(self, array_path="data/arrays/image_data"):
+    def __init__(self, array_path="db/arrays/image_data"):
         self.array_path = array_path
         self.original_width = 200
         self.target_width = 150

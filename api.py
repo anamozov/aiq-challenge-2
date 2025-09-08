@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any
 from matplotlib.colors import LinearSegmentedColormap
 import matplotlib.pyplot as plt
+from pipeline_manager import DataPipelineManager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -27,8 +28,8 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-ARRAY_PATH = "data/arrays/image_data"
-CACHE_DIR = "data/cache"
+ARRAY_PATH = "db/arrays/image_data"
+CACHE_DIR = "db/cache"
 Path(CACHE_DIR).mkdir(parents=True, exist_ok=True)
 
 def create_custom_colormap():
@@ -357,6 +358,7 @@ class ImageAPI:
             raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
 
 api = ImageAPI()
+pipeline_manager = DataPipelineManager()
 
 class QueryValidator:
     def __init__(self, api_instance):
@@ -425,14 +427,25 @@ validator = QueryValidator(api)
 @app.get("/")
 async def root():
     return {
-        "message": "Image Processing API",
-        "version": "1.0.0",
+        "message": "Image Processing API with Automated Pipeline",
+        "version": "2.0.0",
         "endpoints": {
             "images": "/images",
-            "frames": "/frames",
+            "frames": "/frames", 
             "frames_image": "/frames/image",
             "stats": "/stats",
-            "health": "/health"
+            "health": "/health",
+            "pipeline_status": "/pipeline/status",
+            "pipeline_start": "/pipeline/start",
+            "pipeline_stop": "/pipeline/stop",
+            "pipeline_scan": "/pipeline/scan",
+            "pipeline_history": "/pipeline/history"
+        },
+        "pipeline": {
+            "watch_directory": "data",
+            "processed_directory": "data/processed", 
+            "failed_directory": "data/failed",
+            "database_directory": "db"
         }
     }
 
@@ -575,3 +588,80 @@ async def get_frames_as_image(
     except Exception as e:
         logger.error(f"Error generating image: {e}")
         raise HTTPException(status_code=500, detail=f"Image generation failed: {str(e)}")
+
+@app.get("/pipeline/status")
+async def get_pipeline_status():
+    try:
+        status = pipeline_manager.get_status()
+        return {
+            "status": "active" if pipeline_manager.running else "stopped",
+            "last_run": status.get("last_run"),
+            "total_processed": status.get("total_processed", 0),
+            "failed_files_count": len(status.get("failed_files", [])),
+            "recent_history": status.get("processing_history", [])[-10:],
+            "watch_directory": str(pipeline_manager.watch_directory),
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error getting pipeline status: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get pipeline status: {str(e)}")
+
+@app.post("/pipeline/start")
+async def start_pipeline():
+    try:
+        if pipeline_manager.running:
+            return {"message": "Pipeline is already running", "status": "active"}
+        
+        pipeline_manager.start()
+        return {
+            "message": "Pipeline started successfully",
+            "status": "active",
+            "watch_directory": str(pipeline_manager.watch_directory),
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error starting pipeline: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to start pipeline: {str(e)}")
+
+@app.post("/pipeline/stop")
+async def stop_pipeline():
+    try:
+        if not pipeline_manager.running:
+            return {"message": "Pipeline is already stopped", "status": "stopped"}
+        
+        pipeline_manager.stop()
+        return {
+            "message": "Pipeline stopped successfully",
+            "status": "stopped",
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error stopping pipeline: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to stop pipeline: {str(e)}")
+
+@app.post("/pipeline/scan")
+async def trigger_scan():
+    try:
+        pipeline_manager.scan_existing_files()
+        return {
+            "message": "File scan triggered successfully",
+            "watch_directory": str(pipeline_manager.watch_directory),
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error triggering scan: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to trigger scan: {str(e)}")
+
+@app.get("/pipeline/history")
+async def get_processing_history():
+    try:
+        status = pipeline_manager.get_status()
+        return {
+            "processing_history": status.get("processing_history", []),
+            "total_processed": status.get("total_processed", 0),
+            "failed_files": status.get("failed_files", []),
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error getting processing history: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get processing history: {str(e)}")

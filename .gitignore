@@ -130,12 +130,21 @@ dmypy.json
 .pyre/
 
 # Project specific
-# Data files
-data/arrays/
+# Database and cache files
+db/arrays/
+db/cache/
+db/*.json
+
+# Data pipeline directories
 data/processed/
-data/cache/
+data/failed/
+
+# Log files
 logs/
+
+# Test and temporary data files
 *.csv
+!Challenge2.csv
 *.png
 *.jpg
 *.jpeg
@@ -143,11 +152,11 @@ logs/
 *.bmp
 *.tiff
 
-# Test outputs
-test_frame.png
-test_combined_image.png
-test_output.png
-verify.png
+# Pipeline status and temporary files
+pipeline_status.json
+*test*.csv
+test_*.png
+*_test.png
 
 # IDE files
 .vscode/

@@ -2,9 +2,12 @@ import requests
 import json
 import time
 import base64
+import os
+import sys
 from PIL import Image
 import io
-import sys
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 class APITester:
     def __init__(self, base_url="http://localhost:8000"):

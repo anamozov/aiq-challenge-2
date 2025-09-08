@@ -15,6 +15,7 @@ from PIL import Image
 import logging
 import time
 from datetime import datetime
+from typing import List, Optional, Dict, Any
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -87,6 +88,126 @@ class ArrayStats(BaseModel):
     dimensions: Dimensions
     attributes: list
     compression_info: str
+
+class ValidationError(BaseModel):
+    error: str
+    message: str
+    details: Optional[Dict[str, Any]] = None
+
+class ImageNotFoundError(ValidationError):
+    error: str = "Image not found"
+    available_images: List[int]
+
+class InvalidDepthRangeError(ValidationError):
+    error: str = "Invalid depth range"
+    available_range: DepthRange
+    requested_range: DepthRange
+
+class QueryValidator:
+    def __init__(self, api_instance):
+        self.api = api_instance
+        self._cached_images = None
+        self._cache_timestamp = None
+        self._cache_ttl = 60  # Cache for 60 seconds
+    
+    def _get_cached_images(self):
+        """Get cached images or refresh cache if needed."""
+        current_time = time.time()
+        
+        if (self._cached_images is None or 
+            self._cache_timestamp is None or 
+            current_time - self._cache_timestamp > self._cache_ttl):
+            
+            try:
+                images_response = self.api.get_images()
+                self._cached_images = {img.image_id: img for img in images_response.images}
+                self._cache_timestamp = current_time
+                logger.info(f"Cached {len(self._cached_images)} images")
+            except Exception as e:
+                logger.error(f"Failed to cache images: {e}")
+                self._cached_images = {}
+        
+        return self._cached_images
+    
+    def validate_image_id(self, image_id: int) -> ImageInfo:
+        """Validate that the image ID exists and return image info."""
+        images = self._get_cached_images()
+        
+        if not images:
+            raise HTTPException(
+                status_code=503, 
+                detail="Unable to retrieve available images. Please try again later."
+            )
+        
+        if image_id not in images:
+            available_ids = sorted(images.keys())
+            error_detail = ImageNotFoundError(
+                message=f"Image ID {image_id} not found. Available images: {available_ids}",
+                available_images=available_ids
+            )
+            raise HTTPException(status_code=404, detail=error_detail.dict())
+        
+        return images[image_id]
+    
+    def validate_depth_range(self, image_info: ImageInfo, depth_min: float, depth_max: float):
+        """Validate that the depth range is within the image's available range."""
+        # Check if depth_min is less than depth_max
+        if depth_min >= depth_max:
+            raise HTTPException(
+                status_code=400, 
+                detail="depth_min must be less than depth_max"
+            )
+        
+        # Check if depth range is within available range
+        if depth_min < image_info.depth_min or depth_max > image_info.depth_max:
+            error_detail = InvalidDepthRangeError(
+                message=f"Depth range {depth_min}-{depth_max} is outside available range for image {image_info.image_id}",
+                available_range=DepthRange(
+                    min=image_info.depth_min,
+                    max=image_info.depth_max,
+                    span=image_info.depth_max - image_info.depth_min
+                ),
+                requested_range=DepthRange(
+                    min=depth_min,
+                    max=depth_max,
+                    span=depth_max - depth_min
+                )
+            )
+            raise HTTPException(status_code=400, detail=error_detail.dict())
+        
+        # Check if depth range is too large (optional business rule)
+        max_range_size = 1000.0
+        if depth_max - depth_min > max_range_size:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Depth range too large (max {max_range_size} units). Requested range: {depth_max - depth_min:.1f} units"
+            )
+    
+    def validate_query_parameters(self, image_id: int, depth_min: float, depth_max: float, 
+                                format: str = "json", colormap: bool = True):
+        """Comprehensive validation of all query parameters."""
+        # Validate image ID and get image info
+        image_info = self.validate_image_id(image_id)
+        
+        # Validate depth range
+        self.validate_depth_range(image_info, depth_min, depth_max)
+        
+        # Validate format parameter
+        valid_formats = ["json", "base64"]
+        if format not in valid_formats:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid format '{format}'. Valid formats: {valid_formats}"
+            )
+        
+        # Validate colormap parameter (should be boolean, but FastAPI handles this)
+        if not isinstance(colormap, bool):
+            raise HTTPException(
+                status_code=400,
+                detail="colormap parameter must be a boolean value"
+            )
+        
+        return image_info
 
 class SubsurfaceAPI:
     def __init__(self, array_path=ARRAY_PATH):
@@ -407,6 +528,7 @@ class SubsurfaceAPI:
             raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
 
 api = SubsurfaceAPI()
+validator = QueryValidator(api)
 
 @app.get("/")
 async def root():
@@ -450,17 +572,28 @@ async def get_images():
 
 @app.get("/frames", response_model=DepthRangeResponse)
 async def get_frames_by_depth_range(
-    depth_min: float = Query(..., description="Minimum depth value", ge=9000.0),
-    depth_max: float = Query(..., description="Maximum depth value", le=10000.0),
-    image_id: int = Query(1, description="Image ID", ge=1),
+    depth_min: float = Query(..., description="Minimum depth value"),
+    depth_max: float = Query(..., description="Maximum depth value"),
+    image_id: int = Query(1, description="Image ID"),
     format: str = Query("json", description="Response format: 'json' or 'base64'"),
     colormap: bool = Query(True, description="Include color-mapped data")
 ):
-    if depth_min >= depth_max:
-        raise HTTPException(status_code=400, detail="depth_min must be less than depth_max")
+    # Debug logging
+    logging.info(f"Starting validation for image_id={image_id}, depth_min={depth_min}, depth_max={depth_max}")
     
-    if depth_max - depth_min > 1000:
-        raise HTTPException(status_code=400, detail="Depth range too large (max 1000 units)")
+    # Validate all query parameters
+    try:
+        image_info = validator.validate_query_parameters(
+            image_id=image_id,
+            depth_min=depth_min,
+            depth_max=depth_max,
+            format=format,
+            colormap=colormap
+        )
+        logging.info(f"Validation passed for image_id={image_id}")
+    except Exception as e:
+        logging.error(f"Validation failed for image_id={image_id}: {e}")
+        raise
     
     result = api.query_depth_range(
         image_id=image_id,
@@ -479,8 +612,14 @@ async def get_frames_as_image(
     image_id: int = Query(1, description="Image ID"),
     colormap: bool = Query(True, description="Use color mapping")
 ):
-    if depth_min >= depth_max:
-        raise HTTPException(status_code=400, detail="depth_min must be less than depth_max")
+    # Validate all query parameters
+    image_info = validator.validate_query_parameters(
+        image_id=image_id,
+        depth_min=depth_min,
+        depth_max=depth_max,
+        format="json",  # Always JSON for this endpoint
+        colormap=colormap
+    )
     
     try:
         result = api.query_depth_range(

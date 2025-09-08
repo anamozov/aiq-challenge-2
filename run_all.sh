@@ -26,4 +26,4 @@ echo "------------------"
 echo "Starting API server..."
 echo "Press Ctrl+C to stop the API service"
 
-docker-compose up --build subsurface-api
+docker-compose up --build image-api

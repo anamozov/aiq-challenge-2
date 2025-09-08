@@ -9,7 +9,7 @@ A complete solution for processing and querying subsurface imaging data with eff
 - **REST API**: Query images by depth range with multiple response formats
 - **Custom Colormap**: Geological visualization with blue-to-red colormap
 - **Docker Support**: Containerized deployment ready
-- **Multi-Survey Support**: Handle multiple survey datasets
+- **Multi-image Support**: Handle multiple image datasets
 
 ## Quick Start
 
@@ -43,7 +43,7 @@ docker-compose up --build
 
 - `GET /health` - Health check
 - `GET /stats` - Array statistics
-- `GET /surveys` - List available surveys
+- `GET /images` - List available images
 - `GET /frames` - Query frames by depth range
 - `GET /frames/image` - Get frames as PNG image
 
@@ -51,7 +51,7 @@ docker-compose up --build
 
 Query frames from depth 9100 to 9200:
 ```bash
-curl "http://localhost:8000/frames?depth_min=9100&depth_max=9200&survey_id=1"
+curl "http://localhost:8000/frames?depth_min=9100&depth_max=9200&image_id=1"
 ```
 
 ## Requirements

@@ -24,11 +24,11 @@ services:
       - aiq_network
 
   # API Service
-  subsurface-api:
+  image-api:
     build:
       context: .
       dockerfile: Dockerfile.api
-    container_name: aiq_subsurface_api
+    container_name: aiq_image_api
     ports:
       - "8000:8000"
     volumes:

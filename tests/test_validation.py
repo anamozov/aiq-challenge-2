@@ -5,14 +5,19 @@ import os
 import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from app.logging_config import get_test_logger
+
+logger = get_test_logger(__name__)
 
 class ValidationTester:
+    """Test query parameter validation"""
     def __init__(self, base_url="http://localhost:8000"):
         self.base_url = base_url
         self.session = requests.Session()
     
     def test_valid_queries(self):
-        print("Testing valid queries...")
+        """Test valid query parameters"""
+        logger.info("Testing valid queries...")
         
         test_cases = [
             {
@@ -34,14 +39,15 @@ class ValidationTester:
                 response = self.session.get(f"{self.base_url}/frames", params=case["params"])
                 if response.status_code == 200:
                     data = response.json()
-                    print(f"  ✓ {case['name']}: {data['total_frames']} frames")
+                    logger.info(f"  ✓ {case['name']}: {data['total_frames']} frames")
                 else:
-                    print(f"  ✗ {case['name']}: {response.status_code}")
+                    logger.error(f"  ✗ {case['name']}: {response.status_code}")
             except Exception as e:
-                print(f"  ✗ {case['name']}: {e}")
+                logger.error(f"  ✗ {case['name']}: {e}")
     
     def test_invalid_image_ids(self):
-        print("\nTesting invalid image IDs...")
+        """Test invalid image ID handling"""
+        logger.info("\nTesting invalid image IDs...")
         
         invalid_ids = [0, 999, -1, 100]
         
@@ -51,14 +57,14 @@ class ValidationTester:
                 response = self.session.get(f"{self.base_url}/frames", params=params)
                 
                 if response.status_code == 404:
-                    print(f"  ✓ Image ID {image_id}: Correctly rejected (404)")
+                    logger.info(f"  ✓ Image ID {image_id}: Correctly rejected (404)")
                 else:
-                    print(f"  ✗ Image ID {image_id}: Expected 404, got {response.status_code}")
+                    logger.error(f"  ✗ Image ID {image_id}: Expected 404, got {response.status_code}")
             except Exception as e:
-                print(f"  ✗ Image ID {image_id}: {e}")
+                logger.error(f"  ✗ Image ID {image_id}: {e}")
     
     def test_invalid_depth_ranges(self):
-        print("\nTesting invalid depth ranges...")
+        logger.info("\nTesting invalid depth ranges...")
         
         test_cases = [
             {"name": "Inverted range", "depth_min": 9010, "depth_max": 9000},
@@ -77,14 +83,14 @@ class ValidationTester:
                 response = self.session.get(f"{self.base_url}/frames", params=params)
                 
                 if response.status_code == 400:
-                    print(f"  ✓ {case['name']}: Correctly rejected (400)")
+                    logger.info(f"  ✓ {case['name']}: Correctly rejected (400)")
                 else:
-                    print(f"  ✗ {case['name']}: Expected 400, got {response.status_code}")
+                    logger.error(f"  ✗ {case['name']}: Expected 400, got {response.status_code}")
             except Exception as e:
-                print(f"  ✗ {case['name']}: {e}")
+                logger.error(f"  ✗ {case['name']}: {e}")
     
     def test_invalid_parameters(self):
-        print("\nTesting invalid parameters...")
+        logger.info("\nTesting invalid parameters...")
         
         test_cases = [
             {"name": "Invalid format", "params": {"depth_min": 9000, "depth_max": 9010, "image_id": 1, "format": "xml"}},
@@ -97,14 +103,14 @@ class ValidationTester:
                 response = self.session.get(f"{self.base_url}/frames", params=case["params"])
                 
                 if response.status_code in [400, 422]:
-                    print(f"  ✓ {case['name']}: Correctly rejected ({response.status_code})")
+                    logger.info(f"  ✓ {case['name']}: Correctly rejected ({response.status_code})")
                 else:
-                    print(f"  ✗ {case['name']}: Expected 400/422, got {response.status_code}")
+                    logger.error(f"  ✗ {case['name']}: Expected 400/422, got {response.status_code}")
             except Exception as e:
-                print(f"  ✗ {case['name']}: {e}")
+                logger.error(f"  ✗ {case['name']}: {e}")
     
     def test_edge_cases(self):
-        print("\nTesting edge cases...")
+        logger.info("\nTesting edge cases...")
         
         test_cases = [
             {"name": "Single depth point", "depth_min": 9000.1, "depth_max": 9000.1},
@@ -123,16 +129,16 @@ class ValidationTester:
                 
                 if response.status_code == 200:
                     data = response.json()
-                    print(f"  ✓ {case['name']}: {data['total_frames']} frames")
+                    logger.info(f"  ✓ {case['name']}: {data['total_frames']} frames")
                 elif response.status_code == 400:
-                    print(f"  ⚠ {case['name']}: No data in range (400)")
+                    logger.info(f"  ⚠ {case['name']}: No data in range (400)")
                 else:
-                    print(f"  ✗ {case['name']}: {response.status_code}")
+                    logger.error(f"  ✗ {case['name']}: {response.status_code}")
             except Exception as e:
-                print(f"  ✗ {case['name']}: {e}")
+                logger.error(f"  ✗ {case['name']}: {e}")
     
     def test_format_options(self):
-        print("\nTesting format options...")
+        logger.info("\nTesting format options...")
         
         formats = ["json", "base64"]
         
@@ -144,18 +150,18 @@ class ValidationTester:
                 if response.status_code == 200:
                     data = response.json()
                     if fmt == "json" and data['frames'] and 'rgb_data' in data['frames'][0]:
-                        print(f"  ✓ Format {fmt}: RGB data structure")
+                        logger.info(f"  ✓ Format {fmt}: RGB data structure")
                     elif fmt == "base64" and data['frames'] and 'image_data' in data['frames'][0]:
-                        print(f"  ✓ Format {fmt}: Base64 image data")
+                        logger.info(f"  ✓ Format {fmt}: Base64 image data")
                     else:
-                        print(f"  ⚠ Format {fmt}: Unexpected response structure")
+                        logger.info(f"  ⚠ Format {fmt}: Unexpected response structure")
                 else:
-                    print(f"  ✗ Format {fmt}: {response.status_code}")
+                    logger.error(f"  ✗ Format {fmt}: {response.status_code}")
             except Exception as e:
-                print(f"  ✗ Format {fmt}: {e}")
+                logger.error(f"  ✗ Format {fmt}: {e}")
     
     def test_colormap_options(self):
-        print("\nTesting colormap options...")
+        logger.info("\nTesting colormap options...")
         
         colormap_options = [True, False]
         
@@ -169,20 +175,20 @@ class ValidationTester:
                     if data['frames']:
                         frame = data['frames'][0]
                         if colormap and 'rgb_data' in frame:
-                            print(f"  ✓ Colormap {colormap}: RGB data provided")
+                            logger.info(f"  ✓ Colormap {colormap}: RGB data provided")
                         elif not colormap and 'grayscale_data' in frame:
-                            print(f"  ✓ Colormap {colormap}: Grayscale data provided")
+                            logger.info(f"  ✓ Colormap {colormap}: Grayscale data provided")
                         else:
-                            print(f"  ⚠ Colormap {colormap}: Unexpected data format")
+                            logger.info(f"  ⚠ Colormap {colormap}: Unexpected data format")
                     else:
-                        print(f"  ⚠ Colormap {colormap}: No frames returned")
+                        logger.info(f"  ⚠ Colormap {colormap}: No frames returned")
                 else:
-                    print(f"  ✗ Colormap {colormap}: {response.status_code}")
+                    logger.error(f"  ✗ Colormap {colormap}: {response.status_code}")
             except Exception as e:
-                print(f"  ✗ Colormap {colormap}: {e}")
+                logger.error(f"  ✗ Colormap {colormap}: {e}")
     
     def test_performance_validation(self):
-        print("\nTesting query performance...")
+        logger.info("\nTesting query performance...")
         
         params = {"depth_min": 9000, "depth_max": 9050, "image_id": 1}
         
@@ -196,29 +202,29 @@ class ValidationTester:
                 if response.status_code == 200:
                     query_time = (end_time - start_time) * 1000
                     times.append(query_time)
-                    print(f"  Query {i+1}: {query_time:.1f}ms")
+                    logger.info(f"  Query {i+1}: {query_time:.1f}ms")
                 else:
-                    print(f"  Query {i+1}: Failed ({response.status_code})")
+                    logger.info(f"  Query {i+1}: Failed ({response.status_code})")
             except Exception as e:
-                print(f"  Query {i+1}: Error ({e})")
+                logger.info(f"  Query {i+1}: Error ({e})")
         
         if times:
             avg_time = sum(times) / len(times)
             min_time = min(times)
             max_time = max(times)
-            print(f"  Performance summary: avg={avg_time:.1f}ms, min={min_time:.1f}ms, max={max_time:.1f}ms")
+            logger.info(f"  Performance summary: avg={avg_time:.1f}ms, min={min_time:.1f}ms, max={max_time:.1f}ms")
     
     def run_all_validation_tests(self):
-        print("🔍 Starting comprehensive validation tests...")
-        print("=" * 60)
+        logger.info("🔍 Starting comprehensive validation tests...")
+        logger.info("=" * 60)
         
         try:
             response = self.session.get(f"{self.base_url}/health")
             if response.status_code != 200:
-                print("❌ API health check failed - cannot run validation tests")
+                logger.error("❌ API health check failed - cannot run validation tests")
                 return False
         except Exception as e:
-            print(f"❌ Cannot connect to API: {e}")
+            logger.info(f"❌ Cannot connect to API: {e}")
             return False
         
         self.test_valid_queries()
@@ -230,8 +236,8 @@ class ValidationTester:
         self.test_colormap_options()
         self.test_performance_validation()
         
-        print("=" * 60)
-        print("✅ Validation tests completed!")
+        logger.info("=" * 60)
+        logger.info("✅ Validation tests completed!")
         return True
 
 def main():
@@ -240,7 +246,7 @@ def main():
     else:
         base_url = "http://localhost:8000"
     
-    print(f"Running validation tests against: {base_url}")
+    logger.info(f"Running validation tests against: {base_url}")
     
     tester = ValidationTester(base_url)
     success = tester.run_all_validation_tests()

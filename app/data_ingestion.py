@@ -7,12 +7,12 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 import time
-import logging
+from app.logging_config import get_logger
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 class ImageDataProcessor:
+    """Processes CSV survey data into TileDB arrays"""
     def __init__(self, array_path="db/arrays/image_data"):
         self.array_path = array_path
         self.original_width = 200
@@ -20,12 +20,15 @@ class ImageDataProcessor:
         self.custom_colormap = self._create_custom_colormap()
     
     def _create_custom_colormap(self):
+        """Create geological colormap for visualization"""
         colors = ['#000080', '#0000FF', '#00FFFF', '#00FF00', '#FFFF00', '#FF8000', '#FF0000']
         n_bins = 256
         cmap = LinearSegmentedColormap.from_list('geological', colors, N=n_bins)
         return cmap
     
     def create_array_schema(self, max_images=1000, max_depths=10000, width=150):
+        """Create TileDB schema for 3D image data storage"""
+        # Define dimensions: image_id, depth_index, pixel_index
         image_dim = tiledb.Dim(
             name="image_id",
             domain=(1, max_images),
@@ -49,6 +52,8 @@ class ImageDataProcessor:
         
         domain = tiledb.Domain(image_dim, depth_dim, pixel_dim)
         
+        # Define attributes for intensity, depth values, and timestamps
+        
         intensity_attr = tiledb.Attr(
             name="intensity_value",
             dtype=np.uint8,
@@ -70,8 +75,10 @@ class ImageDataProcessor:
         return schema
     
     def resize_image_row(self, row_data):
+        """Resize image row from 200 to 150 pixels using interpolation"""
         from scipy.ndimage import zoom
         
+        # Handle unexpected row sizes
         if len(row_data) != self.original_width:
             logger.warning(f"Expected {self.original_width} pixels, got {len(row_data)}")
             if len(row_data) > self.original_width:
@@ -83,9 +90,11 @@ class ImageDataProcessor:
         
         row_data = np.array(row_data, dtype=np.float32)
         
+        # Skip empty or invalid rows
         if np.all(np.isnan(row_data)) or np.all(row_data == 0):
             return np.zeros(self.target_width, dtype=np.float32)
         
+        # Calculate scaling factor and apply zoom interpolation
         scaling_factor = self.target_width / self.original_width
         
         resized_row = zoom(row_data, scaling_factor, order=3, mode='nearest', prefilter=True)
@@ -101,6 +110,7 @@ class ImageDataProcessor:
         return resized_row
     
     def apply_colormap(self, intensity_values):
+        """Apply geological colormap to intensity values"""
         normalized = (intensity_values - intensity_values.min()) / (intensity_values.max() - intensity_values.min() + 1e-8)
         colored = self.custom_colormap(normalized)
         
@@ -111,6 +121,7 @@ class ImageDataProcessor:
         return red, green, blue
     
     def _get_next_image_id(self):
+        """Get next available image ID from TileDB array"""
         if not tiledb.object_type(self.array_path) == "array":
             return 1
         
@@ -126,6 +137,7 @@ class ImageDataProcessor:
             return 1
     
     def get_available_images(self):
+        """Get list of available image IDs"""
         if not tiledb.object_type(self.array_path) == "array":
             return []
         
@@ -143,11 +155,13 @@ class ImageDataProcessor:
             return []
     
     def process_csv_file(self, csv_file_path):
-        logger.info(f"Processing CSV file: {csv_file_path}")
+        """Process CSV file and store in TileDB array"""
+        logger.info(f"Starting CSV processing: {os.path.basename(csv_file_path)}")
         
         depth_values = []
         image_data = []
         
+        # Read CSV data
         with open(csv_file_path, 'r') as file:
             reader = csv.reader(file)
             headers = next(reader)
@@ -158,6 +172,7 @@ class ImageDataProcessor:
                     continue
                 
                 try:
+                    # Extract depth and pixel values
                     depth = float(row[0])
                     pixel_values = [float(val) if val.strip() != '' else 0.0 for val in row[1:201]]
                     
@@ -175,44 +190,49 @@ class ImageDataProcessor:
         depth_values = np.array(depth_values, dtype=np.float32)
         image_data = np.array(image_data, dtype=np.float32)
         
-        logger.info(f"Loaded {len(depth_values)} depth levels with {image_data.shape[1]} pixels each")
-        logger.info(f"Depth range: {depth_values.min():.1f} to {depth_values.max():.1f}")
+        logger.info(f"Loaded data: {len(depth_values)} depth levels, {image_data.shape[1]} pixels per level")
+        logger.info(f"Depth range: {depth_values.min():.1f}m to {depth_values.max():.1f}m")
         
         image_id = self._get_next_image_id()
-        logger.info(f"Processing as image ID: {image_id}")
+        logger.info(f"Assigning image ID: {image_id}")
         
         self._process_and_store_data(image_data, depth_values, image_id)
     
     def _process_and_store_data(self, image_data, depth_values, image_id):
-        logger.info("Resizing images...")
+        """Process and store image data in TileDB"""
+        logger.debug("Resizing image data from 200 to 150 pixels...")
         height, width = image_data.shape
         resized_image_data = np.zeros((height, self.target_width), dtype=np.float32)
         
+        # Resize each row from 200 to 150 pixels
         for i in range(height):
             resized_image_data[i] = self.resize_image_row(image_data[i])
         
+        # Clean and normalize intensity data
         resized_image_data = np.nan_to_num(resized_image_data, nan=0.0, posinf=255.0, neginf=0.0)
         normalized_intensities = np.clip(resized_image_data, 0, 255).astype(np.uint8)
         
-        logger.info("Storing raw intensity values (colormap will be applied at query time)...")
+        logger.debug("Storing normalized intensity values in TileDB...")
         
+        # Prepare depth and timestamp arrays
         depth_array = np.broadcast_to(depth_values[:, np.newaxis], (height, self.target_width))
         timestamp_array = np.full((height, self.target_width), int(time.time() * 1000000), dtype=np.int64)
         
         if tiledb.object_type(self.array_path) == "array":
-            logger.info("Appending to existing array...")
+            logger.debug("Appending data to existing TileDB array...")
             self._append_to_existing_array(
                 normalized_intensities, depth_array, timestamp_array, image_id
             )
         else:
-            logger.info("Creating new TileDB array...")
+            logger.info("Creating new TileDB array for first image...")
             self._create_new_array(
                 normalized_intensities, depth_array, timestamp_array, image_id
             )
         
-        logger.info(f"Successfully processed {height} depth levels")
+        logger.info(f"Successfully stored {height} depth levels in TileDB")
     
     def _create_new_array(self, intensities, depth_array, timestamp_array, image_id):
+        """Create new TileDB array and store data"""
         height, width = intensities.shape
         
         import os
@@ -228,9 +248,10 @@ class ImageDataProcessor:
                 "processed_at": timestamp_array
             }
         
-        logger.info(f"Created new 3D array with image_id={image_id}, depth_range=0:{height-1}, width={width}")
+        logger.info(f"Created TileDB array: image_id={image_id}, depths={height}, width={width}")
     
     def _append_to_existing_array(self, intensities, depth_array, timestamp_array, image_id):
+        """Append data to existing TileDB array"""
         height, width = intensities.shape
         
         import os
@@ -250,6 +271,7 @@ class ImageDataProcessor:
         if width != 150:
             raise ValueError(f"Expected width 150, got {width}")
         
+        # Check if image ID already exists
         with tiledb.open(self.array_path, mode="r") as A:
             non_empty_domain = A.nonempty_domain()
             if non_empty_domain[0][0] is not None and image_id >= non_empty_domain[0][0] and image_id <= non_empty_domain[0][1]:
@@ -266,10 +288,11 @@ class ImageDataProcessor:
                 "processed_at": timestamp_array
             }
         
-        logger.info(f"Appended image {image_id} at depth range {start_depth}:{start_depth + height - 1}")
+        logger.info(f"Appended image {image_id}: {height} depth levels starting at index {start_depth}")
     
     def _recreate_array_with_larger_domain(self, intensities, depth_array, timestamp_array, 
                                          existing_height, required_max_depth):
+        """Recreate array with larger domain when needed"""
         logger.info("Recreating array with larger domain...")
         
         backup_path = f"{self.array_path}_backup_{int(time.time())}"
@@ -311,6 +334,7 @@ class ImageDataProcessor:
             raise
     
     def get_array_info(self):
+        """Get TileDB array information and stats"""
         if not tiledb.object_type(self.array_path) == "array":
             return {"status": "Array does not exist"}
         
@@ -330,6 +354,7 @@ class ImageDataProcessor:
             return {"error": str(e)}
 
 def main():
+    """Main entry point for standalone data processing"""
     processor = ImageDataProcessor()
     
     csv_file = "Challenge2.csv"

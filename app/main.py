@@ -9,16 +9,15 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 import cv2
 from PIL import Image
-import logging
 import time
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 from matplotlib.colors import LinearSegmentedColormap
 import matplotlib.pyplot as plt
 from app.pipeline_manager import DataPipelineManager
+from app.logging_config import get_logger
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 app = FastAPI(
     title="Image Processing API",
@@ -33,6 +32,7 @@ CACHE_DIR = "db/cache"
 Path(CACHE_DIR).mkdir(parents=True, exist_ok=True)
 
 def create_custom_colormap():
+    """Create geological colormap for visualization"""
     colors = ['#000080', '#0000FF', '#00FFFF', '#00FF00', '#FFFF00', '#FF8000', '#FF0000']
     n_bins = 256
     return LinearSegmentedColormap.from_list('geological', colors, N=n_bins)
@@ -40,6 +40,7 @@ def create_custom_colormap():
 CUSTOM_COLORMAP = create_custom_colormap()
 
 def apply_colormap_to_intensities(intensity_values):
+    """Apply colormap to intensity values and return RGB channels"""
     if intensity_values.max() > intensity_values.min():
         normalized = (intensity_values - intensity_values.min()) / (intensity_values.max() - intensity_values.min())
     else:
@@ -110,13 +111,16 @@ class ArrayStats(BaseModel):
     attributes: List[str]
 
 class ImageAPI:
+    """Main API class for querying TileDB image data"""
     def __init__(self, array_path=ARRAY_PATH):
         self.array_path = array_path
     
     def array_exists(self):
+        """Check if TileDB array exists"""
         return tiledb.object_type(self.array_path) == "array"
     
     def get_available_images(self):
+        """Get list of available images with metadata"""
         if not self.array_exists():
             return []
         
@@ -127,10 +131,12 @@ class ImageAPI:
                 if non_empty_domain[0][0] is None or non_empty_domain[0][1] is None:
                     return []
                 
+                # Get image ID range from non-empty domain
                 min_image_id = non_empty_domain[0][0]
                 max_image_id = non_empty_domain[0][1]
                 
                 images = []
+                # Iterate through all possible image IDs
                 for image_id in range(min_image_id, max_image_id + 1):
                     try:
                         query_data = array[image_id, :, :]
@@ -164,6 +170,7 @@ class ImageAPI:
             return []
     
     def get_array_stats(self):
+        """Get comprehensive array statistics"""
         if not self.array_exists():
             raise RuntimeError(f"TileDB array not found at {self.array_path}.")
         
@@ -199,6 +206,7 @@ class ImageAPI:
             raise HTTPException(status_code=500, detail=f"Failed to get array stats: {str(e)}")
     
     def query_depth_range(self, image_id, depth_min, depth_max, return_format="json", include_colormap=True):
+        """Query image data for specific depth range"""
         start_time = time.time()
         
         try:
@@ -206,7 +214,7 @@ class ImageAPI:
                 raise RuntimeError(f"TileDB array not found at {self.array_path}.")
             
             with tiledb.open(self.array_path, mode='r') as array:
-                logger.info(f"Querying depth range {depth_min} to {depth_max} for image {image_id}")
+                logger.debug(f"Querying image {image_id}, depth range {depth_min}m-{depth_max}m, format={return_format}, colormap={include_colormap}")
                 
                 non_empty_domain = array.nonempty_domain()
                 image_domain = non_empty_domain[0]
@@ -242,16 +250,18 @@ class ImageAPI:
                         processing_time_ms=(time.time() - start_time) * 1000
                     )
                 
+                # Extract depth and intensity data
                 depth_values = query_data['depth_value']
                 intensity_values = query_data['intensity_value']
                 
                 unique_depths = depth_values[:, 0]
                 
+                # Filter data by depth range
                 depth_mask = (unique_depths >= depth_min) & (unique_depths <= depth_max)
                 final_mask = depth_mask
                 
                 if not np.any(final_mask):
-                    logger.warning(f"No data found for image {image_id} in depth range {depth_min}-{depth_max}")
+                    logger.warning(f"No data found for image {image_id} in depth range {depth_min}m-{depth_max}m")
                     return DepthRangeResponse(
                         query_info=QueryInfo(
                             image_id=image_id,
@@ -271,6 +281,7 @@ class ImageAPI:
                 unique_depths = np.unique(filtered_depths)
                 frames = []
                 
+                # Process frames with or without colormap
                 if include_colormap:
                     for i, depth in enumerate(unique_depths):
                         frame_data = {
@@ -318,7 +329,7 @@ class ImageAPI:
                         intensity_pixels = filtered_intensities[i, :]
                         
                         if len(intensity_pixels) != 150:
-                            logger.warning(f"Expected 150 pixels, got {len(intensity_pixels)} for depth {depth}")
+                            logger.debug(f"Pixel count mismatch at depth {depth}m: expected 150, got {len(intensity_pixels)}")
                             if len(intensity_pixels) > 150:
                                 intensity_pixels = intensity_pixels[:150]
                             else:
@@ -361,6 +372,7 @@ api = ImageAPI()
 pipeline_manager = DataPipelineManager()
 
 class QueryValidator:
+    """Validates API query parameters"""
     def __init__(self, api_instance):
         self.api = api_instance
         self.cache_timeout = 60
@@ -368,6 +380,7 @@ class QueryValidator:
         self._cache_timestamp = 0
     
     def _get_cached_images(self):
+        """Get cached image list with timeout"""
         current_time = time.time()
         if (self._image_cache is None or 
             current_time - self._cache_timestamp > self.cache_timeout):
@@ -376,6 +389,7 @@ class QueryValidator:
         return self._image_cache
     
     def validate_query_parameters(self, image_id, depth_min, depth_max, format, colormap):
+        """Validate all query parameters"""
         available_images = self._get_cached_images()
         
         if not available_images:
@@ -426,6 +440,7 @@ validator = QueryValidator(api)
 
 @app.get("/")
 async def root():
+    """API root endpoint with system information"""
     return {
         "message": "Image Processing API with Automated Pipeline",
         "version": "2.0.0",
@@ -451,6 +466,7 @@ async def root():
 
 @app.get("/health")
 async def health_check():
+    """Health check endpoint"""
     try:
         array_exists = api.array_exists()
         if array_exists:
@@ -477,6 +493,7 @@ async def health_check():
 
 @app.get("/images", response_model=ImagesResponse)
 async def get_images():
+    """Get all available images"""
     try:
         images = api.get_available_images()
         return ImagesResponse(
@@ -489,6 +506,7 @@ async def get_images():
 
 @app.get("/stats", response_model=ArrayStats)
 async def get_stats():
+    """Get array statistics"""
     try:
         return api.get_array_stats()
     except Exception as e:
@@ -497,6 +515,7 @@ async def get_stats():
 
 @app.get("/frames", response_model=DepthRangeResponse)
 async def get_frames(
+    # Get frame data for depth range
     depth_min: float = Query(..., description="Minimum depth value"),
     depth_max: float = Query(..., description="Maximum depth value"),
     image_id: int = Query(1, description="Image ID"),
@@ -525,6 +544,7 @@ async def get_frames(
 
 @app.get("/frames/image")
 async def get_frames_as_image(
+    # Get frames as PNG image
     depth_min: float = Query(..., description="Minimum depth value"),
     depth_max: float = Query(..., description="Maximum depth value"),
     image_id: int = Query(1, description="Image ID"),
@@ -554,6 +574,7 @@ async def get_frames_as_image(
         height = len(frames)
         width = 150
         
+        # Combine frames into single image
         if colormap and frames[0].rgb_data:
             combined_image = np.zeros((height, width, 3), dtype=np.uint8)
             for i, frame in enumerate(frames):
@@ -591,6 +612,7 @@ async def get_frames_as_image(
 
 @app.get("/pipeline/status")
 async def get_pipeline_status():
+    """Get pipeline status and statistics"""
     try:
         status = pipeline_manager.get_status()
         return {
@@ -608,6 +630,7 @@ async def get_pipeline_status():
 
 @app.post("/pipeline/start")
 async def start_pipeline():
+    """Start the automated pipeline"""
     try:
         if pipeline_manager.running:
             return {"message": "Pipeline is already running", "status": "active"}
@@ -625,6 +648,7 @@ async def start_pipeline():
 
 @app.post("/pipeline/stop")
 async def stop_pipeline():
+    """Stop the automated pipeline"""
     try:
         if not pipeline_manager.running:
             return {"message": "Pipeline is already stopped", "status": "stopped"}
@@ -641,6 +665,7 @@ async def stop_pipeline():
 
 @app.post("/pipeline/scan")
 async def trigger_scan():
+    """Manually trigger file scan"""
     try:
         pipeline_manager.scan_existing_files()
         return {
@@ -654,6 +679,7 @@ async def trigger_scan():
 
 @app.get("/pipeline/history")
 async def get_processing_history():
+    """Get processing history and failed files"""
     try:
         status = pipeline_manager.get_status()
         return {

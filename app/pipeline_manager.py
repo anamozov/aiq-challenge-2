@@ -1,7 +1,6 @@
 import os
 import time
 import json
-import logging
 import threading
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -10,21 +9,20 @@ from watchdog.events import FileSystemEventHandler
 import schedule
 import pandas as pd
 from app.data_ingestion import ImageDataProcessor
+from app.logging_config import get_logger
 from typing import Dict, List, Optional
 import hashlib
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 class CSVValidator:
+    """Validates CSV file structure and data quality"""
     def __init__(self):
         self.required_columns = 201
         self.expected_headers = ['depth'] + [f'pixel_{i}' for i in range(200)]
     
     def validate_csv_structure(self, file_path):
+        """Check if CSV has correct column count and structure"""
         try:
             df = pd.read_csv(file_path, nrows=1)
             
@@ -49,6 +47,7 @@ class CSVValidator:
             return False, f"CSV validation error: {str(e)}"
     
     def validate_data_quality(self, file_path):
+        """Check data quality - nulls, empty values, etc"""
         try:
             df = pd.read_csv(file_path)
             
@@ -71,11 +70,13 @@ class CSVValidator:
             return False, f"Data quality validation error: {str(e)}"
 
 class ProcessingStatus:
+    """Manages pipeline processing status and history"""
     def __init__(self, status_file="db/pipeline_status.json"):
         self.status_file = status_file
         self.ensure_status_file()
     
     def ensure_status_file(self):
+        # Create status file if it doesn't exist
         os.makedirs(os.path.dirname(self.status_file), exist_ok=True)
         if not os.path.exists(self.status_file):
             self.save_status({
@@ -102,6 +103,7 @@ class ProcessingStatus:
             json.dump(status, f, indent=2, default=str)
     
     def update_processing_result(self, file_path, success, error_message=None, processing_time=None):
+        """Update status with processing result"""
         status = self.load_status()
         
         result = {
@@ -123,25 +125,29 @@ class ProcessingStatus:
             if str(file_path) not in status["failed_files"]:
                 status["failed_files"].append(str(file_path))
         
+        # Keep only last 50 entries to avoid file bloat
         status["processing_history"] = status["processing_history"][-50:]
         
         self.save_status(status)
 
 class FileWatcher(FileSystemEventHandler):
+    """Watches for new CSV files and triggers processing"""
     def __init__(self, pipeline_manager):
         self.pipeline_manager = pipeline_manager
         self.processed_files = set()
     
     def on_created(self, event):
+        # Handle new file creation
         if not event.is_directory and event.src_path.endswith('.csv'):
             filename = os.path.basename(event.src_path)
             if filename not in self.processed_files:
                 logger.info(f"New CSV file detected: {event.src_path}")
-                time.sleep(1)
+                time.sleep(1)  # Wait for file to be fully written
                 self.processed_files.add(filename)
                 self.pipeline_manager.process_file(event.src_path)
     
     def on_modified(self, event):
+        # Handle file modification
         if not event.is_directory and event.src_path.endswith('.csv'):
             filename = os.path.basename(event.src_path)
             if filename not in self.processed_files:
@@ -151,6 +157,7 @@ class FileWatcher(FileSystemEventHandler):
                 self.pipeline_manager.process_file(event.src_path)
 
 class DataPipelineManager:
+    """Main pipeline manager for automated CSV processing"""
     def __init__(self, 
                  watch_directory="data",
                  processed_directory="data/processed",
@@ -172,10 +179,11 @@ class DataPipelineManager:
         self.running = False
     
     def process_file(self, file_path):
+        """Process a single CSV file through validation and ingestion"""
         file_path = Path(file_path)
         start_time = time.time()
         
-        logger.info(f"Processing file: {file_path}")
+        logger.info(f"Processing file: {file_path.name} (size: {file_path.stat().st_size} bytes)")
         
         try:
             valid_structure, structure_msg = self.validator.validate_csv_structure(file_path)
@@ -186,12 +194,12 @@ class DataPipelineManager:
             if not valid_quality:
                 raise ValueError(f"Quality validation failed: {quality_msg}")
             
-            logger.info(f"Validation passed: {quality_msg}")
+            logger.debug(f"Validation passed: {quality_msg}")
             
             self.processor.process_csv_file(str(file_path))
             
             processing_time = time.time() - start_time
-            logger.info(f"Successfully processed {file_path} in {processing_time:.2f}s")
+            logger.info(f"Successfully processed {file_path.name} in {processing_time:.2f}s")
             
             self._move_file(file_path, self.processed_directory)
             self.status.update_processing_result(file_path, True, processing_time=processing_time)
@@ -199,14 +207,16 @@ class DataPipelineManager:
         except Exception as e:
             processing_time = time.time() - start_time
             error_msg = str(e)
-            logger.error(f"Failed to process {file_path}: {error_msg}")
+            logger.error(f"Failed to process {file_path.name}: {error_msg}")
             
             self._move_file(file_path, self.failed_directory)
             self.status.update_processing_result(file_path, False, error_msg, processing_time)
     
     def _move_file(self, source, destination_dir):
+        """Move file to destination, handle naming conflicts"""
         try:
             destination = destination_dir / source.name
+            # Handle file name conflicts by adding counter
             counter = 1
             while destination.exists():
                 name_parts = source.stem, counter, source.suffix
@@ -214,22 +224,24 @@ class DataPipelineManager:
                 counter += 1
             
             source.rename(destination)
-            logger.info(f"Moved {source} to {destination}")
+            logger.debug(f"Moved {source.name} to {destination}")
         except Exception as e:
             logger.error(f"Failed to move file {source}: {e}")
     
     def scan_existing_files(self):
+        """Scan watch directory for existing CSV files"""
         logger.info(f"Scanning for existing files in {self.watch_directory}")
         
         csv_files = list(self.watch_directory.glob("*.csv"))
         if csv_files:
-            logger.info(f"Found {len(csv_files)} existing CSV files")
+            logger.info(f"Found {len(csv_files)} existing CSV files to process")
             for csv_file in csv_files:
                 self.process_file(csv_file)
         else:
-            logger.info("No existing CSV files found")
+            logger.debug("No existing CSV files found in watch directory")
     
     def start_file_watcher(self):
+        """Start file system watcher"""
         if self.observer is not None:
             return
         
@@ -248,11 +260,13 @@ class DataPipelineManager:
             logger.info("File watcher stopped")
     
     def start_scheduler(self):
+        """Start scheduled scanning every 30 minutes and daily at 3 AM"""
         schedule.every(30).minutes.do(self.scan_existing_files)
         schedule.every().day.at("03:00").do(self.scan_existing_files)
         
-        logger.info("Scheduler started: scanning every 30 minutes and daily at 3 AM")
+        logger.info("Background scheduler started: scanning every 30 minutes and daily at 3 AM")
         
+        # Run scheduler in background thread
         def run_scheduler():
             while self.running:
                 schedule.run_pending()
@@ -262,6 +276,7 @@ class DataPipelineManager:
         scheduler_thread.start()
     
     def start(self):
+        """Start the complete pipeline system"""
         logger.info("Starting Data Pipeline Manager")
         self.running = True
         
@@ -272,15 +287,18 @@ class DataPipelineManager:
         logger.info("Data Pipeline Manager started successfully")
     
     def stop(self):
+        """Stop the pipeline system"""
         logger.info("Stopping Data Pipeline Manager")
         self.running = False
         self.stop_file_watcher()
         logger.info("Data Pipeline Manager stopped")
     
     def get_status(self):
+        """Get current pipeline status"""
         return self.status.load_status()
 
 def main():
+    """Main entry point for standalone pipeline execution"""
     pipeline = DataPipelineManager()
     
     try:

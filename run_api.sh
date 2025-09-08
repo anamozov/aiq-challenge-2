@@ -1,7 +1,9 @@
 #!/bin/bash
+# Start only the API service
 
 echo "Starting API Service..."
 
+# Check if data exists before starting API
 if [ ! -d "db/arrays/image_data" ]; then
     echo "Error: No data found. Run data ingestion first:"
     echo "   ./run_ingestion.sh"

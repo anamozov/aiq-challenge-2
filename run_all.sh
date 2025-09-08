@@ -1,4 +1,5 @@
 #!/bin/bash
+# Complete pipeline execution - ingestion then API
 
 echo "Starting Complete Pipeline..."
 
@@ -10,9 +11,11 @@ if [ ! -f "Challenge2.csv" ]; then
     exit 1
 fi
 
+# Process CSV data into TileDB
 echo "Running data ingestion..."
 docker-compose --profile ingestion up --build data-ingestion
 
+# Check if ingestion succeeded
 if [ $? -ne 0 ]; then
     echo "Data ingestion failed!"
     exit 1
@@ -23,6 +26,7 @@ echo "Data ingestion completed!"
 echo ""
 echo "STEP 2: API Service"
 echo "------------------"
+# Start the API service
 echo "Starting API server..."
 echo "Press Ctrl+C to stop the API service"
 

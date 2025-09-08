@@ -11,4 +11,4 @@ echo "Processing CSV data..."
 docker-compose --profile ingestion up --build data-ingestion
 
 echo "Data ingestion completed!"
-echo "Check ./data/arrays/ for TileDB arrays"
+echo "Check ./db/arrays/ for TileDB arrays"

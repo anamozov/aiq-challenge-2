@@ -2,7 +2,7 @@
 
 echo "Starting API Service..."
 
-if [ ! -d "data/arrays/image_data" ]; then
+if [ ! -d "db/arrays/image_data" ]; then
     echo "Error: No data found. Run data ingestion first:"
     echo "   ./run_ingestion.sh"
     exit 1

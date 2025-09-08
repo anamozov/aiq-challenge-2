@@ -10,6 +10,8 @@ services:
     volumes:
       # Mount data directory for persistence
       - ./data:/app/data
+      # Mount database directory for TileDB arrays
+      - ./db:/app/db
       # Mount CSV file
       - ./Challenge2.csv:/app/Challenge2.csv:ro
       # Mount logs
@@ -34,6 +36,8 @@ services:
     volumes:
       # Mount data directory for persistence (shared with ingestion)
       - ./data:/app/data
+      # Mount database directory for TileDB arrays (shared with ingestion)
+      - ./db:/app/db
       # Mount logs
       - ./logs:/app/logs
     environment:

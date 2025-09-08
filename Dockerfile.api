@@ -1,5 +1,5 @@
 # API Service Dockerfile
-FROM python:3.10-slim as base
+FROM python:3.10-slim AS base
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
@@ -29,12 +29,13 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy API code only
+# Copy API code and pipeline manager
 COPY api.py .
-COPY test_api.py .
+COPY pipeline_manager.py .
+COPY data_ingestion.py .
 
-# Create necessary directories
-RUN mkdir -p data/arrays data/cache logs
+# Create necessary directories for new structure
+RUN mkdir -p data/processed data/failed db/arrays db/cache logs
 
 # Expose port
 EXPOSE 8000

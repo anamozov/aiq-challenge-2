@@ -17,6 +17,10 @@ matplotlib==3.7.2
 pandas==2.0.3
 scipy==1.11.3
 
+# Pipeline automation
+watchdog==3.0.0
+schedule==1.2.0
+
 # API utilities
 aiofiles==23.2.1
 requests==2.31.0

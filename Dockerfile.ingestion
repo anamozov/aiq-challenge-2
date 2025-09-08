@@ -1,5 +1,5 @@
 # Data Ingestion Service Dockerfile
-FROM python:3.10-slim as base
+FROM python:3.10-slim AS base
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
@@ -33,7 +33,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY data_ingestion.py .
 
 # Create necessary directories
-RUN mkdir -p data/arrays data/processed logs
+RUN mkdir -p db/arrays data/processed data/failed logs
 
 # Default command - run data ingestion
 CMD ["python", "data_ingestion.py"]

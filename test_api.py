@@ -1,6 +1,3 @@
-"""
-Test script for the Subsurface Imaging API.
-"""
 import requests
 import json
 import time
@@ -31,222 +28,186 @@ class APITester:
             print(f"Health check error: {e}")
             return False
     
-    def test_stats(self):
-        print("Testing statistics endpoint...")
+    def test_images_endpoint(self):
+        print("\nTesting /images endpoint...")
         try:
-            response = self.session.get(f"{self.base_url}/stats")
+            response = self.session.get(f"{self.base_url}/images")
             if response.status_code == 200:
                 data = response.json()
-                print("Statistics retrieved successfully:")
-                print(f"Array path: {data['array_path']}")
-                print(f"Total surveys: {data['total_surveys']}")
-                print(f"Depth range: {data['depth_range']['min']:.1f} - {data['depth_range']['max']:.1f}")
-                print(f"Compression: {data['compression_info']}")
-                return True
+                print(f"Found {data['total_images']} images")
+                for img in data['images']:
+                    print(f"  Image {img['image_id']}: depths {img['depth_min']:.1f}-{img['depth_max']:.1f} ({img['depth_count']} levels)")
+                return data['images']
             else:
-                print(f"Statistics failed: {response.status_code}")
-                return False
+                print(f"Images endpoint failed: {response.status_code}")
+                return []
         except Exception as e:
-            print(f"Statistics error: {e}")
-            return False
+            print(f"Images endpoint error: {e}")
+            return []
     
-    def test_frames_json(self):
-        print("Testing frames endpoint (JSON format)...")
+    def test_frames_endpoint(self, image_id=1, depth_min=9000, depth_max=9010):
+        print(f"\nTesting /frames endpoint (image {image_id}, depth {depth_min}-{depth_max})...")
         try:
             params = {
-                "depth_min": 9100.0,
-                "depth_max": 9110.0,
-                "survey_id": 1,
+                "image_id": image_id,
+                "depth_min": depth_min,
+                "depth_max": depth_max,
                 "format": "json",
                 "colormap": True
             }
             
             start_time = time.time()
             response = self.session.get(f"{self.base_url}/frames", params=params)
-            request_time = (time.time() - start_time) * 1000
+            end_time = time.time()
             
             if response.status_code == 200:
                 data = response.json()
-                print("JSON frames retrieved successfully:")
-                print(f"Request time: {request_time:.1f}ms")
-                print(f"Total frames: {data['total_frames']}")
+                query_time = (end_time - start_time) * 1000
+                print(f"Query successful: {data['total_frames']} frames in {query_time:.1f}ms")
                 print(f"Processing time: {data['processing_time_ms']:.1f}ms")
                 
                 if data['frames']:
-                    first_frame = data['frames'][0]
-                    print(f"Frame dimensions: {first_frame['width']}x{first_frame['height']}")
-                    print(f"Format: {first_frame['format']}")
-                    print(f"Depth: {first_frame['depth']}")
+                    frame = data['frames'][0]
+                    print(f"Sample frame: depth={frame['depth']}, format={frame['format']}")
+                    if 'rgb_data' in frame:
+                        rgb = frame['rgb_data']
+                        print(f"RGB data available: R={len(rgb['red'])}, G={len(rgb['green'])}, B={len(rgb['blue'])} pixels")
                 
                 return True
             else:
-                print(f"JSON frames failed: {response.status_code}")
-                print(f"Error: {response.text}")
+                print(f"Frames endpoint failed: {response.status_code} - {response.text}")
                 return False
         except Exception as e:
-            print(f"JSON frames error: {e}")
+            print(f"Frames endpoint error: {e}")
             return False
     
-    def test_frames_base64(self):
-        print("Testing frames endpoint (Base64 format)...")
+    def test_image_generation(self, image_id=1, depth_min=9000, depth_max=9020):
+        print(f"\nTesting /frames/image endpoint (image {image_id}, depth {depth_min}-{depth_max})...")
         try:
             params = {
-                "depth_min": 9100.0,
-                "depth_max": 9105.0,
-                "survey_id": 1,
-                "format": "base64",
+                "image_id": image_id,
+                "depth_min": depth_min,
+                "depth_max": depth_max,
                 "colormap": True
             }
             
-            response = self.session.get(f"{self.base_url}/frames", params=params)
-            
-            if response.status_code == 200:
-                data = response.json()
-                print("Base64 frames retrieved successfully:")
-                print(f"Total frames: {data['total_frames']}")
-                
-                if data['frames'] and 'image_data' in data['frames'][0]:
-                    img_data = data['frames'][0]['image_data']
-                    img_bytes = base64.b64decode(img_data)
-                    img = Image.open(io.BytesIO(img_bytes))
-                    print(f"First image size: {img.size}")
-                    print(f"Image mode: {img.mode}")
-                    
-                    img.save("test_frame.png")
-                    print(f"Saved test image: test_frame.png")
-                
-                return True
-            else:
-                print(f"Base64 frames failed: {response.status_code}")
-                return False
-        except Exception as e:
-            print(f"Base64 frames error: {e}")
-            return False
-    
-    def test_frames_image(self):
-        print("Testing direct image endpoint...")
-        try:
-            params = {
-                "depth_min": 9100.0,
-                "depth_max": 9120.0,
-                "survey_id": 1,
-                "colormap": True
-            }
-            
+            start_time = time.time()
             response = self.session.get(f"{self.base_url}/frames/image", params=params)
+            end_time = time.time()
             
             if response.status_code == 200:
-                print("Direct image retrieved successfully:")
+                query_time = (end_time - start_time) * 1000
+                print(f"Image generation successful in {query_time:.1f}ms")
                 print(f"Content type: {response.headers.get('content-type')}")
                 print(f"Content length: {len(response.content)} bytes")
                 
-                with open("test_combined_image.png", "wb") as f:
-                    f.write(response.content)
-                print(f"Saved combined image: test_combined_image.png")
+                try:
+                    img = Image.open(io.BytesIO(response.content))
+                    print(f"Image dimensions: {img.size[0]}x{img.size[1]}")
+                    print(f"Image mode: {img.mode}")
+                    
+                    output_file = f"test_output_image_{image_id}_{depth_min}_{depth_max}.png"
+                    img.save(output_file)
+                    print(f"Saved test image as: {output_file}")
+                except Exception as e:
+                    print(f"Could not process image: {e}")
                 
                 return True
             else:
-                print(f"Direct image failed: {response.status_code}")
+                print(f"Image generation failed: {response.status_code} - {response.text}")
                 return False
         except Exception as e:
-            print(f"Direct image error: {e}")
+            print(f"Image generation error: {e}")
+            return False
+    
+    def test_stats_endpoint(self):
+        print("\nTesting /stats endpoint...")
+        try:
+            response = self.session.get(f"{self.base_url}/stats")
+            if response.status_code == 200:
+                data = response.json()
+                print(f"Array path: {data['array_path']}")
+                print(f"Total surveys: {data['total_surveys']}")
+                print(f"Depth range: {data['depth_range']['min']:.1f} to {data['depth_range']['max']:.1f}")
+                print(f"Depth span: {data['depth_range']['span']:.1f}")
+                print(f"Dimensions: depth_index={data['dimensions']['depth_index']}, pixel_index={data['dimensions']['pixel_index']}")
+                print(f"Attributes: {', '.join(data['attributes'])}")
+                return True
+            else:
+                print(f"Stats endpoint failed: {response.status_code}")
+                return False
+        except Exception as e:
+            print(f"Stats endpoint error: {e}")
             return False
     
     def test_error_handling(self):
-        print("Testing error handling...")
+        print("\nTesting error handling...")
         
+        print("  Testing invalid image ID...")
         try:
-            params = {
-                "depth_min": 9200.0,
-                "depth_max": 9100.0,
-                "survey_id": 1
-            }
+            params = {"image_id": 999, "depth_min": 9000, "depth_max": 9010}
+            response = self.session.get(f"{self.base_url}/frames", params=params)
+            if response.status_code == 404:
+                print("    ✓ Invalid image ID properly rejected")
+            else:
+                print(f"    ✗ Expected 404, got {response.status_code}")
+        except Exception as e:
+            print(f"    ✗ Error testing invalid image ID: {e}")
+        
+        print("  Testing invalid depth range...")
+        try:
+            params = {"image_id": 1, "depth_min": 9010, "depth_max": 9000}
             response = self.session.get(f"{self.base_url}/frames", params=params)
             if response.status_code == 400:
-                print("Invalid depth range properly rejected")
+                print("    ✓ Invalid depth range properly rejected")
             else:
-                print(f"Expected 400, got {response.status_code}")
+                print(f"    ✗ Expected 400, got {response.status_code}")
         except Exception as e:
-            print(f"Error handling test failed: {e}")
+            print(f"    ✗ Error testing invalid depth range: {e}")
     
-    def test_performance(self):
-        print("Testing performance...")
+    def run_comprehensive_test(self):
+        print("🚀 Starting comprehensive API tests...")
+        print("=" * 50)
         
-        test_cases = [
-            {"name": "Small range (10 depths)", "depth_min": 9100.0, "depth_max": 9110.0},
-            {"name": "Medium range (50 depths)", "depth_min": 9100.0, "depth_max": 9150.0},
-            {"name": "Large range (100 depths)", "depth_min": 9100.0, "depth_max": 9200.0},
-        ]
-        
-        for case in test_cases:
-            try:
-                params = {
-                    "depth_min": case["depth_min"],
-                    "depth_max": case["depth_max"],
-                    "survey_id": 1,
-                    "format": "json"
-                }
-                
-                start_time = time.time()
-                response = self.session.get(f"{self.base_url}/frames", params=params)
-                request_time = (time.time() - start_time) * 1000
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    print(f"{case['name']}: {request_time:.1f}ms ({data['total_frames']} frames)")
-                else:
-                    print(f"{case['name']}: Failed ({response.status_code})")
-            except Exception as e:
-                print(f"{case['name']}: Error - {e}")
-    
-    def run_all_tests(self):
-        print("Starting API Tests")
-        print("----------------------------------------")
-        
-        tests = [
-            self.test_health,
-            self.test_stats,
-            self.test_frames_json,
-            self.test_frames_base64,
-            self.test_frames_image,
-            self.test_error_handling,
-            self.test_performance
-        ]
-        
-        passed = 0
-        total = len(tests)
-        
-        for test in tests:
-            try:
-                if test():
-                    passed += 1
-            except Exception as e:
-                print(f"Test failed with exception: {e}")
-        
-        print("----------------------------------------")
-        print(f"Test Results: {passed}/{total} tests passed")
-        
-        if passed == total:
-            print("All tests passed!")
-            return True
-        else:
-            print("Some tests failed. Check the output above.")
+        if not self.test_health():
+            print("❌ Health check failed - API may not be running")
             return False
+        
+        images = self.test_images_endpoint()
+        if not images:
+            print("❌ No images available for testing")
+            return False
+        
+        test_image = images[0]
+        image_id = test_image['image_id']
+        depth_min = test_image['depth_min'] + 1
+        depth_max = min(test_image['depth_min'] + 20, test_image['depth_max'])
+        
+        success = True
+        success &= self.test_frames_endpoint(image_id, depth_min, depth_max)
+        success &= self.test_image_generation(image_id, depth_min, depth_max)
+        success &= self.test_stats_endpoint()
+        
+        self.test_error_handling()
+        
+        print("=" * 50)
+        if success:
+            print("✅ All core tests passed!")
+        else:
+            print("❌ Some tests failed")
+        
+        return success
 
 def main():
-    import argparse
+    if len(sys.argv) > 1:
+        base_url = sys.argv[1]
+    else:
+        base_url = "http://localhost:8000"
     
-    parser = argparse.ArgumentParser(description="Test the Subsurface Imaging API")
-    parser.add_argument("--url", default="http://localhost:8000", help="API base URL")
-    parser.add_argument("--wait", type=int, default=5, help="Seconds to wait for API startup")
+    print(f"Testing API at: {base_url}")
     
-    args = parser.parse_args()
-    
-    print(f"Waiting {args.wait} seconds for API to start...")
-    time.sleep(args.wait)
-    
-    tester = APITester(args.url)
-    success = tester.run_all_tests()
+    tester = APITester(base_url)
+    success = tester.run_comprehensive_test()
     
     sys.exit(0 if success else 1)
 

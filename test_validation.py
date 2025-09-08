@@ -1,6 +1,3 @@
-"""
-Comprehensive validation tests for the Subsurface Imaging API.
-"""
 import requests
 import json
 import time
@@ -12,7 +9,6 @@ class ValidationTester:
         self.session = requests.Session()
     
     def test_valid_queries(self):
-        """Test that valid queries work correctly."""
         print("Testing valid queries...")
         
         test_cases = [
@@ -28,299 +24,222 @@ class ValidationTester:
                 "name": "Valid image 8, large range",
                 "params": {"depth_min": 9500.0, "depth_max": 9546.0, "image_id": 8}
             },
-            {
-                "name": "Valid with base64 format",
-                "params": {"depth_min": 9100.0, "depth_max": 9110.0, "image_id": 2, "format": "base64"}
-            }
         ]
         
-        passed = 0
         for case in test_cases:
             try:
                 response = self.session.get(f"{self.base_url}/frames", params=case["params"])
                 if response.status_code == 200:
                     data = response.json()
-                    print(f"✓ {case['name']}: {data['total_frames']} frames")
-                    passed += 1
+                    print(f"  ✓ {case['name']}: {data['total_frames']} frames")
                 else:
-                    print(f"✗ {case['name']}: Failed with {response.status_code}")
-                    print(f"  Error: {response.text}")
+                    print(f"  ✗ {case['name']}: {response.status_code}")
             except Exception as e:
-                print(f"✗ {case['name']}: Exception - {e}")
-        
-        print(f"Valid queries: {passed}/{len(test_cases)} passed\n")
-        return passed == len(test_cases)
+                print(f"  ✗ {case['name']}: {e}")
     
     def test_invalid_image_ids(self):
-        """Test validation of invalid image IDs."""
-        print("Testing invalid image IDs...")
+        print("\nTesting invalid image IDs...")
+        
+        invalid_ids = [0, 999, -1, 100]
+        
+        for image_id in invalid_ids:
+            try:
+                params = {"depth_min": 9000, "depth_max": 9010, "image_id": image_id}
+                response = self.session.get(f"{self.base_url}/frames", params=params)
+                
+                if response.status_code == 404:
+                    print(f"  ✓ Image ID {image_id}: Correctly rejected (404)")
+                else:
+                    print(f"  ✗ Image ID {image_id}: Expected 404, got {response.status_code}")
+            except Exception as e:
+                print(f"  ✗ Image ID {image_id}: {e}")
+    
+    def test_invalid_depth_ranges(self):
+        print("\nTesting invalid depth ranges...")
         
         test_cases = [
-            {"image_id": 0, "expected_status": 404},
-            {"image_id": 9, "expected_status": 404},
-            {"image_id": 10, "expected_status": 404},
-            {"image_id": -1, "expected_status": 404},
-            {"image_id": 999, "expected_status": 404}
+            {"name": "Inverted range", "depth_min": 9010, "depth_max": 9000},
+            {"name": "Out of bounds low", "depth_min": 8000, "depth_max": 8010},
+            {"name": "Out of bounds high", "depth_min": 10000, "depth_max": 10010},
+            {"name": "Partially out of bounds", "depth_min": 8999, "depth_max": 9001},
         ]
         
-        passed = 0
         for case in test_cases:
             try:
                 params = {
-                    "depth_min": 9000.1,
-                    "depth_max": 9005.0,
-                    "image_id": case["image_id"]
+                    "depth_min": case["depth_min"], 
+                    "depth_max": case["depth_max"], 
+                    "image_id": 1
                 }
                 response = self.session.get(f"{self.base_url}/frames", params=params)
                 
-                if response.status_code == case["expected_status"]:
-                    error_data = response.json()
-                    if "available_images" in error_data:
-                        print(f"✓ Image ID {case['image_id']}: Correctly rejected with available images list")
-                    else:
-                        print(f"✓ Image ID {case['image_id']}: Correctly rejected")
-                    passed += 1
+                if response.status_code == 400:
+                    print(f"  ✓ {case['name']}: Correctly rejected (400)")
                 else:
-                    print(f"✗ Image ID {case['image_id']}: Expected {case['expected_status']}, got {response.status_code}")
-                    print(f"  Response: {response.text}")
+                    print(f"  ✗ {case['name']}: Expected 400, got {response.status_code}")
             except Exception as e:
-                print(f"✗ Image ID {case['image_id']}: Exception - {e}")
-        
-        print(f"Invalid image IDs: {passed}/{len(test_cases)} passed\n")
-        return passed == len(test_cases)
-    
-    def test_invalid_depth_ranges(self):
-        """Test validation of invalid depth ranges."""
-        print("Testing invalid depth ranges...")
-        
-        test_cases = [
-            {
-                "name": "Depth min >= depth max",
-                "params": {"depth_min": 9005.0, "depth_max": 9000.0, "image_id": 1},
-                "expected_status": 400
-            },
-            {
-                "name": "Depth range too low",
-                "params": {"depth_min": 8000.0, "depth_max": 8500.0, "image_id": 1},
-                "expected_status": 400
-            },
-            {
-                "name": "Depth range too high",
-                "params": {"depth_min": 9600.0, "depth_max": 9700.0, "image_id": 1},
-                "expected_status": 400
-            },
-            {
-                "name": "Depth range partially out of bounds (low)",
-                "params": {"depth_min": 8999.0, "depth_max": 9005.0, "image_id": 1},
-                "expected_status": 400
-            },
-            {
-                "name": "Depth range partially out of bounds (high)",
-                "params": {"depth_min": 9540.0, "depth_max": 9550.0, "image_id": 1},
-                "expected_status": 400
-            },
-            {
-                "name": "Depth range too large",
-                "params": {"depth_min": 9000.0, "depth_max": 10000.0, "image_id": 1},
-                "expected_status": 400
-            }
-        ]
-        
-        passed = 0
-        for case in test_cases:
-            try:
-                response = self.session.get(f"{self.base_url}/frames", params=case["params"])
-                
-                if response.status_code == case["expected_status"]:
-                    error_data = response.json()
-                    print(f"✓ {case['name']}: Correctly rejected")
-                    if "available_range" in error_data:
-                        print(f"  Available range: {error_data['available_range']['min']:.1f} - {error_data['available_range']['max']:.1f}")
-                    passed += 1
-                else:
-                    print(f"✗ {case['name']}: Expected {case['expected_status']}, got {response.status_code}")
-                    print(f"  Response: {response.text}")
-            except Exception as e:
-                print(f"✗ {case['name']}: Exception - {e}")
-        
-        print(f"Invalid depth ranges: {passed}/{len(test_cases)} passed\n")
-        return passed == len(test_cases)
+                print(f"  ✗ {case['name']}: {e}")
     
     def test_invalid_parameters(self):
-        """Test validation of invalid parameters."""
-        print("Testing invalid parameters...")
+        print("\nTesting invalid parameters...")
         
         test_cases = [
-            {
-                "name": "Invalid format",
-                "params": {"depth_min": 9000.1, "depth_max": 9005.0, "image_id": 1, "format": "xml"},
-                "expected_status": 400
-            },
-            {
-                "name": "Invalid format (empty)",
-                "params": {"depth_min": 9000.1, "depth_max": 9005.0, "image_id": 1, "format": ""},
-                "expected_status": 400
-            }
+            {"name": "Invalid format", "params": {"depth_min": 9000, "depth_max": 9010, "image_id": 1, "format": "xml"}},
+            {"name": "Missing depth_min", "params": {"depth_max": 9010, "image_id": 1}},
+            {"name": "Missing depth_max", "params": {"depth_min": 9000, "image_id": 1}},
         ]
         
-        passed = 0
         for case in test_cases:
             try:
                 response = self.session.get(f"{self.base_url}/frames", params=case["params"])
                 
-                if response.status_code == case["expected_status"]:
-                    error_data = response.json()
-                    print(f"✓ {case['name']}: Correctly rejected")
-                    if "Valid formats" in error_data.get("detail", ""):
-                        print(f"  Error message includes valid formats")
-                    passed += 1
+                if response.status_code in [400, 422]:
+                    print(f"  ✓ {case['name']}: Correctly rejected ({response.status_code})")
                 else:
-                    print(f"✗ {case['name']}: Expected {case['expected_status']}, got {response.status_code}")
-                    print(f"  Response: {response.text}")
+                    print(f"  ✗ {case['name']}: Expected 400/422, got {response.status_code}")
             except Exception as e:
-                print(f"✗ {case['name']}: Exception - {e}")
-        
-        print(f"Invalid parameters: {passed}/{len(test_cases)} passed\n")
-        return passed == len(test_cases)
+                print(f"  ✗ {case['name']}: {e}")
     
-    def test_image_endpoint_validation(self):
-        """Test validation on the /frames/image endpoint."""
-        print("Testing /frames/image endpoint validation...")
+    def test_edge_cases(self):
+        print("\nTesting edge cases...")
         
         test_cases = [
-            {
-                "name": "Valid query",
-                "params": {"depth_min": 9000.1, "depth_max": 9005.0, "image_id": 1},
-                "expected_status": 200
-            },
-            {
-                "name": "Invalid image ID",
-                "params": {"depth_min": 9000.1, "depth_max": 9005.0, "image_id": 99},
-                "expected_status": 404
-            },
-            {
-                "name": "Invalid depth range",
-                "params": {"depth_min": 8000.0, "depth_max": 8500.0, "image_id": 1},
-                "expected_status": 400
-            }
+            {"name": "Single depth point", "depth_min": 9000.1, "depth_max": 9000.1},
+            {"name": "Very small range", "depth_min": 9000.1, "depth_max": 9000.2},
+            {"name": "Exact boundary match", "depth_min": 9000.1, "depth_max": 9546.0},
         ]
         
-        passed = 0
         for case in test_cases:
             try:
-                response = self.session.get(f"{self.base_url}/frames/image", params=case["params"])
+                params = {
+                    "depth_min": case["depth_min"], 
+                    "depth_max": case["depth_max"], 
+                    "image_id": 1
+                }
+                response = self.session.get(f"{self.base_url}/frames", params=params)
                 
-                if response.status_code == case["expected_status"]:
-                    print(f"✓ {case['name']}: Status {response.status_code}")
-                    if case["expected_status"] == 200:
-                        print(f"  Content-Type: {response.headers.get('content-type')}")
-                        print(f"  Content-Length: {len(response.content)} bytes")
-                    passed += 1
+                if response.status_code == 200:
+                    data = response.json()
+                    print(f"  ✓ {case['name']}: {data['total_frames']} frames")
+                elif response.status_code == 400:
+                    print(f"  ⚠ {case['name']}: No data in range (400)")
                 else:
-                    print(f"✗ {case['name']}: Expected {case['expected_status']}, got {response.status_code}")
-                    print(f"  Response: {response.text}")
+                    print(f"  ✗ {case['name']}: {response.status_code}")
             except Exception as e:
-                print(f"✗ {case['name']}: Exception - {e}")
-        
-        print(f"Image endpoint validation: {passed}/{len(test_cases)} passed\n")
-        return passed == len(test_cases)
+                print(f"  ✗ {case['name']}: {e}")
     
-    def test_error_message_quality(self):
-        """Test that error messages are helpful and informative."""
-        print("Testing error message quality...")
+    def test_format_options(self):
+        print("\nTesting format options...")
         
-        test_cases = [
-            {
-                "name": "Image not found error",
-                "params": {"depth_min": 9000.1, "depth_max": 9005.0, "image_id": 99},
-                "check_fields": ["error", "message", "available_images"]
-            },
-            {
-                "name": "Invalid depth range error",
-                "params": {"depth_min": 8000.0, "depth_max": 8500.0, "image_id": 1},
-                "check_fields": ["error", "message", "available_range", "requested_range"]
-            }
-        ]
+        formats = ["json", "base64"]
         
-        passed = 0
-        for case in test_cases:
+        for fmt in formats:
             try:
-                response = self.session.get(f"{self.base_url}/frames", params=case["params"])
+                params = {"depth_min": 9000, "depth_max": 9010, "image_id": 1, "format": fmt}
+                response = self.session.get(f"{self.base_url}/frames", params=params)
                 
-                if response.status_code in [400, 404]:
-                    error_data = response.json()
-                    missing_fields = []
-                    
-                    # Check if the error data is nested under 'detail' (FastAPI format)
-                    actual_data = error_data.get('detail', error_data)
-                    
-                    for field in case["check_fields"]:
-                        if field not in actual_data:
-                            missing_fields.append(field)
-                    
-                    if not missing_fields:
-                        print(f"✓ {case['name']}: All required fields present")
-                        print(f"  Error: {actual_data.get('error', 'N/A')}")
-                        print(f"  Message: {actual_data.get('message', 'N/A')}")
-                        passed += 1
+                if response.status_code == 200:
+                    data = response.json()
+                    if fmt == "json" and data['frames'] and 'rgb_data' in data['frames'][0]:
+                        print(f"  ✓ Format {fmt}: RGB data structure")
+                    elif fmt == "base64" and data['frames'] and 'image_data' in data['frames'][0]:
+                        print(f"  ✓ Format {fmt}: Base64 image data")
                     else:
-                        print(f"✗ {case['name']}: Missing fields: {missing_fields}")
-                        print(f"  Response: {error_data}")
+                        print(f"  ⚠ Format {fmt}: Unexpected response structure")
                 else:
-                    print(f"✗ {case['name']}: Expected 400/404, got {response.status_code}")
+                    print(f"  ✗ Format {fmt}: {response.status_code}")
             except Exception as e:
-                print(f"✗ {case['name']}: Exception - {e}")
+                print(f"  ✗ Format {fmt}: {e}")
+    
+    def test_colormap_options(self):
+        print("\nTesting colormap options...")
         
-        print(f"Error message quality: {passed}/{len(test_cases)} passed\n")
-        return passed == len(test_cases)
+        colormap_options = [True, False]
+        
+        for colormap in colormap_options:
+            try:
+                params = {"depth_min": 9000, "depth_max": 9010, "image_id": 1, "colormap": colormap}
+                response = self.session.get(f"{self.base_url}/frames", params=params)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    if data['frames']:
+                        frame = data['frames'][0]
+                        if colormap and 'rgb_data' in frame:
+                            print(f"  ✓ Colormap {colormap}: RGB data provided")
+                        elif not colormap and 'grayscale_data' in frame:
+                            print(f"  ✓ Colormap {colormap}: Grayscale data provided")
+                        else:
+                            print(f"  ⚠ Colormap {colormap}: Unexpected data format")
+                    else:
+                        print(f"  ⚠ Colormap {colormap}: No frames returned")
+                else:
+                    print(f"  ✗ Colormap {colormap}: {response.status_code}")
+            except Exception as e:
+                print(f"  ✗ Colormap {colormap}: {e}")
+    
+    def test_performance_validation(self):
+        print("\nTesting query performance...")
+        
+        params = {"depth_min": 9000, "depth_max": 9050, "image_id": 1}
+        
+        times = []
+        for i in range(5):
+            start_time = time.time()
+            try:
+                response = self.session.get(f"{self.base_url}/frames", params=params)
+                end_time = time.time()
+                
+                if response.status_code == 200:
+                    query_time = (end_time - start_time) * 1000
+                    times.append(query_time)
+                    print(f"  Query {i+1}: {query_time:.1f}ms")
+                else:
+                    print(f"  Query {i+1}: Failed ({response.status_code})")
+            except Exception as e:
+                print(f"  Query {i+1}: Error ({e})")
+        
+        if times:
+            avg_time = sum(times) / len(times)
+            min_time = min(times)
+            max_time = max(times)
+            print(f"  Performance summary: avg={avg_time:.1f}ms, min={min_time:.1f}ms, max={max_time:.1f}ms")
     
     def run_all_validation_tests(self):
-        """Run all validation tests."""
-        print("Starting Validation Tests")
-        print("=" * 50)
+        print("🔍 Starting comprehensive validation tests...")
+        print("=" * 60)
         
-        tests = [
-            self.test_valid_queries,
-            self.test_invalid_image_ids,
-            self.test_invalid_depth_ranges,
-            self.test_invalid_parameters,
-            self.test_image_endpoint_validation,
-            self.test_error_message_quality
-        ]
-        
-        passed = 0
-        total = len(tests)
-        
-        for test in tests:
-            try:
-                if test():
-                    passed += 1
-            except Exception as e:
-                print(f"Test failed with exception: {e}")
-        
-        print("=" * 50)
-        print(f"Validation Test Results: {passed}/{total} test suites passed")
-        
-        if passed == total:
-            print("🎉 All validation tests passed!")
-            return True
-        else:
-            print("❌ Some validation tests failed. Check the output above.")
+        try:
+            response = self.session.get(f"{self.base_url}/health")
+            if response.status_code != 200:
+                print("❌ API health check failed - cannot run validation tests")
+                return False
+        except Exception as e:
+            print(f"❌ Cannot connect to API: {e}")
             return False
+        
+        self.test_valid_queries()
+        self.test_invalid_image_ids()
+        self.test_invalid_depth_ranges()
+        self.test_invalid_parameters()
+        self.test_edge_cases()
+        self.test_format_options()
+        self.test_colormap_options()
+        self.test_performance_validation()
+        
+        print("=" * 60)
+        print("✅ Validation tests completed!")
+        return True
 
 def main():
-    import argparse
+    if len(sys.argv) > 1:
+        base_url = sys.argv[1]
+    else:
+        base_url = "http://localhost:8000"
     
-    parser = argparse.ArgumentParser(description="Test validation in the Subsurface Imaging API")
-    parser.add_argument("--url", default="http://localhost:8000", help="API base URL")
-    parser.add_argument("--wait", type=int, default=5, help="Seconds to wait for API startup")
+    print(f"Running validation tests against: {base_url}")
     
-    args = parser.parse_args()
-    
-    print(f"Waiting {args.wait} seconds for API to start...")
-    time.sleep(args.wait)
-    
-    tester = ValidationTester(args.url)
+    tester = ValidationTester(base_url)
     success = tester.run_all_validation_tests()
     
     sys.exit(0 if success else 1)

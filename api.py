@@ -33,7 +33,7 @@ Path(CACHE_DIR).mkdir(parents=True, exist_ok=True)
 
 class FrameInfo(BaseModel):
     depth: float
-    survey_id: int
+    image_id: int
     width: int = 150
     height: int = 1
     timestamp: str = None
@@ -41,7 +41,7 @@ class FrameInfo(BaseModel):
 class QueryInfo(BaseModel):
     depth_min: float
     depth_max: float
-    survey_id: int
+    image_id: int
     format: str
     colormap: bool
 
@@ -69,16 +69,16 @@ class Dimensions(BaseModel):
     depth_index: str
     pixel_index: str
 
-class SurveyInfo(BaseModel):
-    survey_id: int
+class ImageInfo(BaseModel):
+    image_id: int
     depth_count: int
     depth_min: float
     depth_max: float
     processed_at: int
 
-class SurveysResponse(BaseModel):
-    surveys: list
-    total_surveys: int
+class ImagesResponse(BaseModel):
+    images: list
+    total_images: int
 
 class ArrayStats(BaseModel):
     array_path: str
@@ -113,23 +113,28 @@ class SubsurfaceAPI:
                 except AttributeError:
                     non_empty_domain = array.non_empty_domain()
                 
-                dim_names = [d.name for d in schema.domain]
-                def get_range(dim_name):
-                    if isinstance(non_empty_domain, dict):
-                        return non_empty_domain.get(dim_name, (0, 0))
-                    idx = dim_names.index(dim_name)
-                    return non_empty_domain[idx]
-
-                data = array[:]
-                depth_values = data['depth_value']
-                survey_ids = data['survey_id']
+                # Get array dimensions efficiently
+                total_rows = non_empty_domain[0][1] + 1 if non_empty_domain[0][1] is not None else 0
                 
-                unique_surveys = np.unique(survey_ids)
-                unique_depths = np.unique(depth_values)
+                # Sample data to get statistics without loading entire array
+                sample_size = min(1000, total_rows)
+                if sample_size > 0:
+                    sample_data = array[0:sample_size, 0:1]
+                    depth_values = sample_data['depth_value']
+                    image_ids = sample_data['image_id']
+                    
+                    unique_images = np.unique(image_ids)
+                    unique_depths = np.unique(depth_values)
+                    
+                    # Estimate total images from sample
+                    estimated_images = len(unique_images)
+                else:
+                    estimated_surveys = 0
+                    unique_depths = np.array([0.0])
                 
                 return ArrayStats(
                     array_path=self.array_path,
-                    total_surveys=len(unique_surveys),
+                    total_surveys=estimated_images,
                     depth_range=DepthRange(
                         min=float(np.min(unique_depths)),
                         max=float(np.max(unique_depths)),
@@ -140,103 +145,162 @@ class SubsurfaceAPI:
                         pixel_index="pixel_index"
                     ),
                     attributes=[schema.attr(i).name for i in range(schema.nattr)],
-                    compression_info="ZSTD level 3"
+                    compression_info="ZSTD level 1"
                 )
         except Exception as e:
             logger.error(f"Error getting array stats: {e}")
             raise HTTPException(status_code=500, detail=f"Error accessing array: {str(e)}")
     
-    def get_surveys(self):
+    def get_images(self):
         try:
             if not self.array_exists():
                 raise RuntimeError(f"TileDB array not found at {self.array_path}.")
             
             with tiledb.open(self.array_path, mode='r') as array:
-                data = array[:]
-                depth_values = data['depth_value']
-                survey_ids = data['survey_id']
-                processed_at = data['processed_at']
+                # Get array dimensions efficiently
+                non_empty_domain = array.nonempty_domain()
+                total_rows = non_empty_domain[0][1] + 1 if non_empty_domain[0][1] is not None else 0
                 
-                unique_surveys = np.unique(survey_ids[:, 0])
-                surveys = []
+                # Sample data from the beginning of each image (every 5461 rows)
+                # Each image is 5461 rows, so sample from start of each image
+                image_size = 5461
+                sample_size = 5461  # Sample the full image to get complete depth range
+                unique_images = set()
+                all_depth_values = []
+                all_image_ids = []
+                all_processed_at = []
                 
-                for survey_id in unique_surveys:
-                    survey_mask = survey_ids[:, 0] == survey_id
+                if total_rows > 0:
+                    # Sample from the beginning of each image
+                    for image_start in range(0, total_rows, image_size):
+                        end_row = min(image_start + sample_size, total_rows)
+                        if image_start < total_rows:
+                            sample = array[image_start:end_row, 0:1]
+                            if 'image_id' in sample:
+                                unique_images.update(sample['image_id'][:, 0])
+                                all_depth_values.extend(sample['depth_value'][:, 0])
+                                all_image_ids.extend(sample['image_id'][:, 0])
+                                all_processed_at.extend(sample['processed_at'][:, 0])
                     
-                    if np.any(survey_mask):
-                        survey_depths = depth_values[survey_mask]
+                    # Convert to numpy arrays for processing
+                    depth_values = np.array(all_depth_values)
+                    image_ids = np.array(all_image_ids)
+                    processed_at = np.array(all_processed_at)
+                    
+                    images = []
+                    
+                    for image_id in unique_images:
+                        image_mask = image_ids == image_id
                         
-                        if hasattr(processed_at, '__getitem__'):
-                            survey_timestamps = processed_at[survey_mask]
+                        if np.any(image_mask):
+                            image_depths = depth_values[image_mask]
+                            
+                            if hasattr(processed_at, '__getitem__'):
+                                image_timestamps = processed_at[image_mask]
+                            else:
+                                image_timestamps = np.array([processed_at] * np.sum(image_mask))
+                            
+                            unique_depths = np.unique(image_depths)
                         else:
-                            survey_timestamps = np.array([processed_at] * np.sum(survey_mask))
+                            continue
                         
-                        unique_depths = np.unique(survey_depths)
-                    else:
-                        continue
+                        finite_depths = unique_depths[np.isfinite(unique_depths)]
+                        
+                        if len(finite_depths) == 0:
+                            logger.warning(f"No valid depth values for image {image_id}")
+                            continue
+                        
+                        depth_min = float(np.min(finite_depths))
+                        depth_max = float(np.max(finite_depths))
+                        processed_at_val = int(np.min(image_timestamps))
+                        
+                        if not (np.isfinite(depth_min) and np.isfinite(depth_max)):
+                            logger.warning(f"Invalid depth values for image {image_id}: min={depth_min}, max={depth_max}")
+                            continue
+                        
+                        images.append(ImageInfo(
+                            image_id=int(image_id),
+                            depth_count=len(unique_depths),
+                            depth_min=depth_min,
+                            depth_max=depth_max,
+                            processed_at=processed_at_val
+                        ))
                     
-                    finite_depths = unique_depths[np.isfinite(unique_depths)]
+                    images.sort(key=lambda x: x.image_id)
                     
-                    if len(finite_depths) == 0:
-                        logger.warning(f"No valid depth values for survey {survey_id}")
-                        continue
-                    
-                    depth_min = float(np.min(finite_depths))
-                    depth_max = float(np.max(finite_depths))
-                    processed_at = int(np.min(survey_timestamps))
-                    
-                    if not (np.isfinite(depth_min) and np.isfinite(depth_max)):
-                        logger.warning(f"Invalid depth values for survey {survey_id}: min={depth_min}, max={depth_max}")
-                        continue
-                    
-                    surveys.append(SurveyInfo(
-                        survey_id=int(survey_id),
-                        depth_count=len(unique_depths),
-                        depth_min=depth_min,
-                        depth_max=depth_max,
-                        processed_at=processed_at
-                    ))
-                
-                surveys.sort(key=lambda x: x.survey_id)
-                
-                return SurveysResponse(
-                    surveys=surveys,
-                    total_surveys=len(surveys)
-                )
+                    return ImagesResponse(
+                        images=images,
+                        total_images=len(images)
+                    )
+                else:
+                    return ImagesResponse(images=[], total_images=0)
                 
         except Exception as e:
-            logger.error(f"Error getting surveys: {e}")
-            raise HTTPException(status_code=500, detail=f"Error accessing surveys: {str(e)}")
+            logger.error(f"Error getting images: {e}")
+            raise HTTPException(status_code=500, detail=f"Error accessing images: {str(e)}")
     
-    def query_depth_range(self, survey_id, depth_min, depth_max, return_format="json", include_colormap=True):
+    def query_depth_range(self, image_id, depth_min, depth_max, return_format="json", include_colormap=True):
         start_time = time.time()
         
         try:
             if not self.array_exists():
                 raise RuntimeError(f"TileDB array not found at {self.array_path}.")
+            
             with tiledb.open(self.array_path, mode='r') as array:
-                depth_min_int = int(depth_min * 10)
-                depth_max_int = int(depth_max * 10)
+                logger.info(f"Querying depth range {depth_min} to {depth_max} for image {image_id}")
                 
-                logger.info(f"Querying depth range {depth_min} to {depth_max} (int: {depth_min_int} to {depth_max_int}) for survey {survey_id}")
+                # Get array dimensions efficiently
+                non_empty_domain = array.nonempty_domain()
+                total_rows = non_empty_domain[0][1] + 1 if non_empty_domain[0][1] is not None else 0
                 
-                data = array[:]
-                depth_values = data['depth_value']
-                intensity_values = data['intensity_value']
-                survey_ids = data['survey_id']
-                
-                unique_depths = depth_values[:, 0]
-                unique_surveys = survey_ids[:, 0]
-                
-                depth_mask = (unique_depths >= depth_min) & (unique_depths <= depth_max)
-                survey_mask = unique_surveys == survey_id
-                final_mask = depth_mask & survey_mask
-                
-                if not np.any(final_mask):
-                    logger.warning(f"No data found for survey {survey_id} in depth range {depth_min}-{depth_max}")
+                if total_rows == 0:
                     return DepthRangeResponse(
                         query_info=QueryInfo(
-                            survey_id=survey_id,
+                            image_id=image_id,
+                            depth_min=depth_min,
+                            depth_max=depth_max,
+                            format=return_format,
+                            colormap=include_colormap
+                        ),
+                        frames=[],
+                        total_frames=0,
+                        processing_time_ms=(time.time() - start_time) * 1000
+                    )
+                
+                # Load all data for now to ensure we get correct results
+                # TODO: Optimize this later with proper range queries
+                query_data = array[:]
+                
+                if len(query_data) == 0:
+                    return DepthRangeResponse(
+                        query_info=QueryInfo(
+                            image_id=image_id,
+                            depth_min=depth_min,
+                            depth_max=depth_max,
+                            format=return_format,
+                            colormap=include_colormap
+                        ),
+                        frames=[],
+                        total_frames=0,
+                        processing_time_ms=(time.time() - start_time) * 1000
+                    )
+                
+                depth_values = query_data['depth_value']
+                intensity_values = query_data['intensity_value']
+                image_ids = query_data['image_id']
+                
+                unique_depths = depth_values[:, 0]
+                unique_images = image_ids[:, 0]
+                
+                depth_mask = (unique_depths >= depth_min) & (unique_depths <= depth_max)
+                image_mask = unique_images == image_id
+                final_mask = depth_mask & image_mask
+                
+                if not np.any(final_mask):
+                    logger.warning(f"No data found for image {image_id} in depth range {depth_min}-{depth_max}")
+                    return DepthRangeResponse(
+                        query_info=QueryInfo(
+                            image_id=image_id,
                             depth_min=depth_min,
                             depth_max=depth_max,
                             format=return_format,
@@ -249,15 +313,14 @@ class SubsurfaceAPI:
                 
                 filtered_depths = unique_depths[final_mask]
                 filtered_intensities = intensity_values[final_mask]
-                filtered_surveys = unique_surveys[final_mask]
                 
                 unique_depths = np.unique(filtered_depths)
                 frames = []
                 
-                if include_colormap and 'red_value' in data:
-                    red_values = data['red_value'][final_mask]
-                    green_values = data['green_value'][final_mask]
-                    blue_values = data['blue_value'][final_mask]
+                if include_colormap and 'red_value' in query_data:
+                    red_values = query_data['red_value'][final_mask]
+                    green_values = query_data['green_value'][final_mask]
+                    blue_values = query_data['blue_value'][final_mask]
                     
                     for i, depth in enumerate(unique_depths):
                         frame_data = {
@@ -328,7 +391,7 @@ class SubsurfaceAPI:
                 
                 return DepthRangeResponse(
                     query_info=QueryInfo(
-                        survey_id=survey_id,
+                        image_id=image_id,
                         depth_min=depth_min,
                         depth_max=depth_max,
                         format=return_format,
@@ -381,15 +444,15 @@ async def health_check():
 async def get_array_statistics():
     return api.get_array_stats()
 
-@app.get("/surveys", response_model=SurveysResponse)
-async def get_surveys():
-    return api.get_surveys()
+@app.get("/images", response_model=ImagesResponse)
+async def get_images():
+    return api.get_images()
 
 @app.get("/frames", response_model=DepthRangeResponse)
 async def get_frames_by_depth_range(
     depth_min: float = Query(..., description="Minimum depth value", ge=9000.0),
     depth_max: float = Query(..., description="Maximum depth value", le=10000.0),
-    survey_id: int = Query(1, description="Survey ID", ge=1),
+    image_id: int = Query(1, description="Image ID", ge=1),
     format: str = Query("json", description="Response format: 'json' or 'base64'"),
     colormap: bool = Query(True, description="Include color-mapped data")
 ):
@@ -400,7 +463,7 @@ async def get_frames_by_depth_range(
         raise HTTPException(status_code=400, detail="Depth range too large (max 1000 units)")
     
     result = api.query_depth_range(
-        survey_id=survey_id,
+        image_id=image_id,
         depth_min=depth_min,
         depth_max=depth_max,
         return_format=format,
@@ -413,7 +476,7 @@ async def get_frames_by_depth_range(
 async def get_frames_as_image(
     depth_min: float = Query(..., description="Minimum depth value"),
     depth_max: float = Query(..., description="Maximum depth value"),
-    survey_id: int = Query(1, description="Survey ID"),
+    image_id: int = Query(1, description="Image ID"),
     colormap: bool = Query(True, description="Use color mapping")
 ):
     if depth_min >= depth_max:
@@ -421,7 +484,7 @@ async def get_frames_as_image(
     
     try:
         result = api.query_depth_range(
-            survey_id=survey_id,
+            image_id=image_id,
             depth_min=depth_min,
             depth_max=depth_max,
             return_format="json",
@@ -435,17 +498,17 @@ async def get_frames_as_image(
         height = len(frames)
         width = 150
         
-        if colormap and frames[0].rgb_data:
+        if colormap and "rgb_data" in frames[0]:
             combined_image = np.zeros((height, width, 3), dtype=np.uint8)
             for i, frame in enumerate(frames):
-                rgb_data = frame.rgb_data
+                rgb_data = frame["rgb_data"]
                 combined_image[i, :, 0] = rgb_data["red"]
                 combined_image[i, :, 1] = rgb_data["green"]  
                 combined_image[i, :, 2] = rgb_data["blue"]
         else:
             combined_image = np.zeros((height, width), dtype=np.uint8)
             for i, frame in enumerate(frames):
-                combined_image[i, :] = frame.grayscale_data
+                combined_image[i, :] = frame["grayscale_data"]
         
         if len(combined_image.shape) == 3:
             img = Image.fromarray(combined_image, mode='RGB')

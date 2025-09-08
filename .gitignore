@@ -181,3 +181,7 @@ Thumbs.db
 # Local configuration
 config.local.py
 settings.local.py
+
+# Project status and summary files
+FINAL_STATUS.md
+PROJECT_SUMMARY.md

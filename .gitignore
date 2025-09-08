@@ -145,7 +145,6 @@ logs/
 # Test and temporary data files
 *.csv
 !Challenge2.csv
-*.png
 *.jpg
 *.jpeg
 *.gif
@@ -155,7 +154,6 @@ logs/
 # Pipeline status and temporary files
 pipeline_status.json
 *test*.csv
-test_*.png
 *_test.png
 
 # IDE files

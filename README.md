@@ -66,8 +66,10 @@ curl "http://localhost:8000/frames?depth_min=9100&depth_max=9200&image_id=1"
 ## Project Structure
 
 ```
-├── api.py                 # Main FastAPI application
-├── data_ingestion.py      # Data processing pipeline
+├── app/                   # Main application package
+│   ├── main.py           # FastAPI application
+│   ├── data_ingestion.py # Data processing pipeline
+│   └── pipeline_manager.py # Automated pipeline orchestration
 ├── tests/                # Test suite directory
 │   ├── test_api.py       # API functionality tests
 │   ├── test_performance.py  # Performance benchmarking  

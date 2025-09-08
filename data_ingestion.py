@@ -28,48 +28,59 @@ class SubsurfaceDataProcessor:
         cmap = LinearSegmentedColormap.from_list('subsurface', colors, N=n_bins)
         return cmap
     
-    def create_array_schema(self, total_height, width=150):
-        # Use a much larger domain to avoid frequent schema changes
-        # This allows for up to 1M depth levels, which should be sufficient
-        max_depth = max(total_height, 1000000)
+    def create_array_schema(self, max_images=1000, max_depths=10000, width=150):
+        """
+        Create optimized 3D schema for efficient geological data queries.
+        
+        Schema: [image_id, depth_index, pixel_index]
+        - image_id: 1 to max_images (tile=10 for efficient image-based queries)
+        - depth_index: 0 to max_depths-1 (tile=100 for efficient depth range queries)
+        - pixel_index: 0 to width-1 (tile=width for efficient pixel access)
+        """
+        image_dim = tiledb.Dim(
+            name="image_id",
+            domain=(1, max_images),
+            tile=1,  # Minimal tiles for fastest array creation
+            dtype=np.uint32
+        )
         
         depth_dim = tiledb.Dim(
-            name="depth_index",
-            domain=(0, max_depth - 1),
-            tile=1000,  # Larger tiles for better performance
+            name="depth_index", 
+            domain=(0, max_depths - 1),
+            tile=100,  # Smaller tiles for faster array creation
             dtype=np.uint32
         )
         
         pixel_dim = tiledb.Dim(
             name="pixel_index",
             domain=(0, width - 1),
-            tile=width,
+            tile=width,  # Full width for efficient pixel access
             dtype=np.uint32
         )
         
-        domain = tiledb.Domain(depth_dim, pixel_dim)
+        domain = tiledb.Domain(image_dim, depth_dim, pixel_dim)
         
+        # Use fast compression for optimal speed/size balance
         intensity_attr = tiledb.Attr(
             name="intensity_value",
             dtype=np.uint8,
-            filters=tiledb.FilterList([tiledb.ZstdFilter(level=1)])  # Lower compression for speed
+            filters=tiledb.FilterList([tiledb.ZstdFilter(level=1)])
         )
-        
         red_attr = tiledb.Attr(name="red_value", dtype=np.uint8, filters=tiledb.FilterList([tiledb.ZstdFilter(level=1)]))
         green_attr = tiledb.Attr(name="green_value", dtype=np.uint8, filters=tiledb.FilterList([tiledb.ZstdFilter(level=1)]))
         blue_attr = tiledb.Attr(name="blue_value", dtype=np.uint8, filters=tiledb.FilterList([tiledb.ZstdFilter(level=1)]))
         
         depth_attr = tiledb.Attr(name="depth_value", dtype=np.float32)
-        image_attr = tiledb.Attr(name="image_id", dtype=np.uint32)
+        # Note: image_id is now a dimension, not an attribute
         timestamp_attr = tiledb.Attr(name="processed_at", dtype=np.int64)
         
         schema = tiledb.ArraySchema(
             domain=domain,
             sparse=False,
-            attrs=[intensity_attr, red_attr, green_attr, blue_attr, depth_attr, image_attr, timestamp_attr],
+            attrs=[intensity_attr, red_attr, green_attr, blue_attr, depth_attr, timestamp_attr],
             cell_order='row-major',
             tile_order='row-major',
-            capacity=100000  # Larger capacity for better performance
+            capacity=100000  # Optimized capacity for performance
         )
         
         return schema
@@ -222,79 +233,97 @@ class SubsurfaceDataProcessor:
             blue_data[i] = blue
         
         depth_array = np.broadcast_to(depth_values[:, np.newaxis], (height, self.target_width))
-        image_array = np.full((height, self.target_width), image_id, dtype=np.uint32)
+        # Create array for metadata (image_id is now a dimension, not an attribute)
         timestamp_array = np.full((height, self.target_width), int(time.time() * 1000000), dtype=np.int64)
         
         if tiledb.object_type(self.array_path) == "array":
             logger.info("Appending to existing array...")
             self._append_to_existing_array(
                 normalized_intensities, red_data, green_data, blue_data,
-                depth_array, image_array, timestamp_array
+                depth_array, timestamp_array, image_id
             )
         else:
             logger.info("Creating new TileDB array...")
             self._create_new_array(
                 normalized_intensities, red_data, green_data, blue_data,
-                depth_array, image_array, timestamp_array
+                depth_array, timestamp_array, image_id
             )
         
         logger.info(f"Successfully processed {height} depth levels")
     
-    def _create_new_array(self, intensities, red_data, green_data, blue_data, depth_array, image_array, timestamp_array):
+    def _create_new_array(self, intensities, red_data, green_data, blue_data, depth_array, timestamp_array, image_id):
         height, width = intensities.shape
         
         # Ensure the directory exists
         import os
         os.makedirs(os.path.dirname(self.array_path), exist_ok=True)
         
-        schema = self.create_array_schema(height, width)
+        schema = self.create_array_schema(max_images=1000, max_depths=10000, width=width)
         tiledb.DenseArray.create(self.array_path, schema)
         
         with tiledb.DenseArray(self.array_path, mode="w") as A:
-            A[0:height, 0:width] = {
+            # Write using 3D coordinates: [image_id, depth_index, pixel_index]
+            A[image_id, 0:height, 0:width] = {
                 "intensity_value": intensities,
                 "red_value": red_data,
                 "green_value": green_data,
                 "blue_value": blue_data,
                 "depth_value": depth_array,
-                "image_id": image_array,
                 "processed_at": timestamp_array
             }
         
-        logger.info(f"Created new array with shape {height}x{width}")
+        logger.info(f"Created new 3D array with image_id={image_id}, depth_range=0:{height-1}, width={width}")
     
-    def _append_to_existing_array(self, intensities, red_data, green_data, blue_data, depth_array, image_array, timestamp_array):
+    def _append_to_existing_array(self, intensities, red_data, green_data, blue_data, depth_array, timestamp_array, image_id):
         height, width = intensities.shape
         
         # Ensure the directory exists
         import os
         os.makedirs(os.path.dirname(self.array_path), exist_ok=True)
         
-        # Get current array info without loading all data
+        # Check if existing array has compatible schema (3D with image_id dimension)
         with tiledb.open(self.array_path, mode="r") as A:
+            schema = A.schema
+            dimensions = [dim.name for dim in schema.domain]
+            
+            # Check if this is a 3D array with image_id dimension
+            if 'image_id' not in dimensions or len(dimensions) != 3:
+                logger.warning("Existing array has incompatible schema. Creating new array instead.")
+                return self._create_new_array(intensities, red_data, green_data, blue_data, depth_array, timestamp_array, image_id)
+            
             non_empty_domain = A.nonempty_domain()
-            existing_height = non_empty_domain[0][1] + 1  # Get max depth_index + 1
+            # For 3D array: [image_id, depth_index, pixel_index]
+            existing_depth_max = non_empty_domain[1][1] + 1 if non_empty_domain[1][1] is not None else 0
         
         # Width should always be 150 based on our processing
         if width != 150:
             raise ValueError(f"Expected width 150, got {width}")
         
-        # Calculate the starting position for the new data
-        start_depth = existing_height
+        # Efficiently check if this image_id already exists using non_empty_domain
+        with tiledb.open(self.array_path, mode="r") as A:
+            non_empty_domain = A.nonempty_domain()
+            if non_empty_domain[0][0] is not None and image_id >= non_empty_domain[0][0] and image_id <= non_empty_domain[0][1]:
+                # Image ID is within the existing range, assign next available ID
+                new_image_id = non_empty_domain[0][1] + 1
+                logger.info(f"Image ID {image_id} already exists. Assigning new ID: {new_image_id}")
+                image_id = new_image_id
         
-        # Use proper TileDB append operation - no need to load existing data!
+        # Calculate the starting depth position for the new image
+        start_depth = 0  # Always start from depth 0 for new images
+        
+        # Use 3D coordinates: [image_id, depth_index, pixel_index]
+        # Write in a single operation for maximum performance
         with tiledb.DenseArray(self.array_path, mode="w") as A:
-            A[start_depth:start_depth + height, 0:width] = {
+            A[image_id, start_depth:start_depth + height, 0:width] = {
                 "intensity_value": intensities,
                 "red_value": red_data,
                 "green_value": green_data,
                 "blue_value": blue_data,
                 "depth_value": depth_array,
-                "image_id": image_array,
                 "processed_at": timestamp_array
             }
         
-        logger.info(f"Appended data. New array shape: {start_depth + height}x{width}")
+        logger.info(f"Appended image {image_id} at depth range {start_depth}:{start_depth + height - 1}")
     
     def _recreate_array_with_larger_domain(self, intensities, red_data, green_data, blue_data, 
                                          depth_array, survey_array, timestamp_array, 

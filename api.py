@@ -292,16 +292,25 @@ class SubsurfaceAPI:
                 all_processed_at = []
                 
                 if total_rows > 0:
-                    # Sample from the beginning of each image
-                    for image_start in range(0, total_rows, image_size):
-                        end_row = min(image_start + sample_size, total_rows)
-                        if image_start < total_rows:
-                            sample = array[image_start:end_row, 0:1]
-                            if 'image_id' in sample:
-                                unique_images.update(sample['image_id'][:, 0])
-                                all_depth_values.extend(sample['depth_value'][:, 0])
-                                all_image_ids.extend(sample['image_id'][:, 0])
-                                all_processed_at.extend(sample['processed_at'][:, 0])
+                    # For 3D array: sample by image_id directly
+                    non_empty_domain = array.nonempty_domain()
+                    if non_empty_domain[0][0] is not None:
+                        # Get all existing image_ids
+                        for img_id in range(non_empty_domain[0][0], non_empty_domain[0][1] + 1):
+                            try:
+                                # Get all depths for this image to find actual range
+                                sample = array[img_id, :, 0:1]  # All depths
+                                depth_values = sample['depth_value'][:, 0]
+                                
+                                # Find actual data range (skip NaN values)
+                                valid_depths = depth_values[~np.isnan(depth_values)]
+                                if len(valid_depths) > 0:
+                                    unique_images.add(img_id)
+                                    all_depth_values.extend([valid_depths[0], valid_depths[-1]])
+                                    all_image_ids.extend([img_id, img_id])
+                                    all_processed_at.extend([sample['processed_at'][0, 0], sample['processed_at'][len(valid_depths)-1, 0]])
+                            except:
+                                pass
                     
                     # Convert to numpy arrays for processing
                     depth_values = np.array(all_depth_values)
@@ -372,9 +381,11 @@ class SubsurfaceAPI:
                 
                 # Get array dimensions efficiently
                 non_empty_domain = array.nonempty_domain()
-                total_rows = non_empty_domain[0][1] + 1 if non_empty_domain[0][1] is not None else 0
+                # For 3D array: [image_id, depth_index, pixel_index]
+                image_domain = non_empty_domain[0]
+                depth_domain = non_empty_domain[1]
                 
-                if total_rows == 0:
+                if image_domain[1] is None or depth_domain[1] is None:
                     return DepthRangeResponse(
                         query_info=QueryInfo(
                             image_id=image_id,
@@ -388,9 +399,9 @@ class SubsurfaceAPI:
                         processing_time_ms=(time.time() - start_time) * 1000
                     )
                 
-                # Load all data for now to ensure we get correct results
-                # TODO: Optimize this later with proper range queries
-                query_data = array[:]
+                # OPTIMIZED: Use 3D range query instead of loading entire array
+                # Query only the specific image and depth range
+                query_data = array[image_id, :, :]  # Get all depths for this image
                 
                 if len(query_data) == 0:
                     return DepthRangeResponse(
@@ -406,16 +417,16 @@ class SubsurfaceAPI:
                         processing_time_ms=(time.time() - start_time) * 1000
                     )
                 
+                # For 3D array, data structure is [depth_index, pixel_index]
                 depth_values = query_data['depth_value']
                 intensity_values = query_data['intensity_value']
-                image_ids = query_data['image_id']
                 
+                # Get depth values from first pixel column (all pixels have same depth)
                 unique_depths = depth_values[:, 0]
-                unique_images = image_ids[:, 0]
                 
+                # Filter by depth range
                 depth_mask = (unique_depths >= depth_min) & (unique_depths <= depth_max)
-                image_mask = unique_images == image_id
-                final_mask = depth_mask & image_mask
+                final_mask = depth_mask
                 
                 if not np.any(final_mask):
                     logger.warning(f"No data found for image {image_id} in depth range {depth_min}-{depth_max}")

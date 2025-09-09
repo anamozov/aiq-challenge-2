@@ -53,15 +53,20 @@ The solution generates colorized PNG image frames from depth ranges:
 ```bash
 # Generate colorized frame with custom colormap
 curl -H "Accept: image/png" "http://localhost:8000/frames/image?image_id=1&depth_min=9201.9&depth_max=9210.3" -o frame.png
+```
+![Sample Frame](test_colormap.png)
 
+```bash
 # Generate grayscale frame
 curl -H "Accept: image/png" "http://localhost:8000/frames/image?image_id=1&depth_min=9201.9&depth_max=9210.3&colormap=false" -o frame_gray.png
+```
+![Sample Frame](test_grayscale.png)
 
+```bash
 # List available images
 curl "http://localhost:8000/images"
 ```
 
-![Sample Frame](test_colormap.png)
 
 ## Project Structure
 
